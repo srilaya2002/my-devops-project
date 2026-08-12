@@ -25,19 +25,3 @@
       when: connectivity_check.rc == 0
       tags:
         - teardown
-The connectivity gate makes it safe to call /deploy/teardown on a host where MSSQL isn't even running (e.g. already torn down) — it skips instead of erroring.
-
-4. New: python-fastapi-mssql/ansible/playbooks/uninstall.yml
----
-- name: Remove MSSQL entirely and return host to a bare VM
-  hosts: mssql_servers
-  become: yes
-  gather_facts: yes
-
-  tasks:
-    - name: Run uninstall tasks
-      include_role:
-        name: mssql
-        tasks_from: uninstall.yml
-      tags:
-        - uninstall

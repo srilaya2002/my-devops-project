@@ -1,0 +1,13 @@
+---
+- name: Fail over the Always On AG to a new primary
+  hosts: mssql_servers
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Run failover tasks
+      include_role:
+        name: mssql
+        tasks_from: failover.yml
+      tags:
+        - failover

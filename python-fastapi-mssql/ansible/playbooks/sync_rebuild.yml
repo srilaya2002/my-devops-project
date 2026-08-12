@@ -1,0 +1,13 @@
+---
+- name: Resynchronize or rejoin a replica to the Always On AG
+  hosts: mssql_servers
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Run sync-rebuild tasks
+      include_role:
+        name: mssql
+        tasks_from: sync_rebuild.yml
+      tags:
+        - sync_rebuild

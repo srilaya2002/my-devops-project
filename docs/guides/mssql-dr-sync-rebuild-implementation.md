@@ -234,6 +234,17 @@ async def deploy_sync_rebuild(background_tasks: BackgroundTasks, target: str):
 (`ag-status` — used below for precheck/postcheck — is the one added in the
 failover guide; nothing new to add for it here.)
 
+### 5. Docs to update
+
+- `python-fastapi-mssql/RUNBOOK.md` — add a "Sync rebuild" block under
+  section 6, next to the `ag-status`/`failover` block from the failover
+  guide, showing the `sync-rebuild` call and the precheck/postcheck pattern.
+- `python-fastapi-mssql/CHANGELOG.md` — new entry describing the
+  `sync-rebuild` addition: the two code paths (resume vs. rejoin-and-reseed),
+  why it reuses `ag-status` instead of its own precheck, and whether it's
+  been live-tested against the VMs yet (in particular, actually forcing a
+  failover and rebuilding the old primary end to end) or only implemented.
+
 ## Run it — CLI
 
 **All-in-one** (the task file already figures out which of the two broken

@@ -1,0 +1,97 @@
+---
+# Resynchronize or rejoin a replica that has fallen behind or dropped out of
+# the Always On AG. Safe to re-run. Invoked with --limit against the single
+# replica being rebuilt. Target should be a SECONDARY, not the current primary.
+
+- name: Verify MSSQL connectivity on the rebuild target
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "SELECT 1"
+  register: connectivity_check
+  retries: 5
+  delay: 5
+  until: connectivity_check.rc == 0
+  changed_when: false
+  tags:
+    - sync_rebuild
+
+- name: Check whether this replica is currently a member of the AG
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.availability_replicas ar WHERE ar.replica_server_name = '{{ vmware_name }}' AND EXISTS (SELECT 1 FROM sys.dm_hadr_availability_replica_states ars WHERE ars.replica_id = ar.replica_id)"
+  register: ag_membership_check
+  changed_when: false
+  tags:
+    - sync_rebuild
+
+# --- Path A: still a member, just suspended ---
+
+- name: Check whether AdventureWorks data movement is suspended on this replica
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ISNULL(drs.is_suspended, 0) FROM sys.databases d LEFT JOIN sys.dm_hadr_database_replica_states drs ON drs.database_id = d.database_id WHERE d.name = 'AdventureWorks'"
+  register: suspended_check
+  changed_when: false
+  when: (ag_membership_check.stdout | trim) == '1'
+  tags:
+    - sync_rebuild
+
+- name: Resume data movement (still a member, just suspended)
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER DATABASE AdventureWorks SET HADR RESUME"
+  when: (ag_membership_check.stdout | trim) == '1' and (suspended_check.stdout | trim) == '1'
+  changed_when: true
+  tags:
+    - sync_rebuild
+
+# --- Path B: fell out of the AG entirely -- rejoin, let automatic seeding reseed it ---
+
+- name: Drop a stale standalone copy of AdventureWorks before rejoining
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "
+    IF EXISTS (
+      SELECT * FROM sys.databases d
+      WHERE d.name = 'AdventureWorks'
+      AND NOT EXISTS (SELECT 1 FROM sys.dm_hadr_database_replica_states drs WHERE drs.database_id = d.database_id)
+    )
+    BEGIN
+      ALTER DATABASE AdventureWorks SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+      DROP DATABASE AdventureWorks;
+    END
+    "
+  when: (ag_membership_check.stdout | trim) == '0'
+  changed_when: true
+  tags:
+    - sync_rebuild
+
+- name: Rejoin the Availability Group
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] JOIN WITH (CLUSTER_TYPE = {{ ag_cluster_type }})"
+  when: (ag_membership_check.stdout | trim) == '0'
+  changed_when: true
+  tags:
+    - sync_rebuild
+
+- name: Grant automatic seeding permission (needed again after rejoin)
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] GRANT CREATE ANY DATABASE"
+  when: (ag_membership_check.stdout | trim) == '0'
+  changed_when: true
+  tags:
+    - sync_rebuild
+
+# --- Verify, either path ---
+
+- name: Wait for AdventureWorks to reach SYNCHRONIZED state on this replica
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT drs.synchronization_state_desc FROM sys.dm_hadr_database_replica_states drs JOIN sys.databases d ON d.database_id = drs.database_id WHERE d.name = 'AdventureWorks'"
+  register: sync_wait
+  retries: 30
+  delay: 10
+  until: (sync_wait.stdout | trim) == 'SYNCHRONIZED'
+  changed_when: false
+  tags:
+    - sync_rebuild
+
+- name: Display final sync state
+  debug:
+    msg: "This replica's AdventureWorks is now {{ sync_wait.stdout | trim }}"
+  tags:
+    - sync_rebuild

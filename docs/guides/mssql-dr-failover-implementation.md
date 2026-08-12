@@ -329,6 +329,18 @@ async def deploy_failover(background_tasks: BackgroundTasks, target: str, mode: 
 as fillable text fields in Swagger's "Try it out" — no example schema to
 write, and it's obvious in the UI what's required.
 
+### 8. Docs to update
+
+- `python-fastapi-mssql/RUNBOOK.md` — add an "AG status and failover" block
+  under section 6 (Test the Workflow), showing `ag-status` and `failover`
+  the same way `alwayson`/`full-ag` are already shown there.
+- `python-fastapi-mssql/CHANGELOG.md` — new entry describing the
+  `ag-status`/`failover` addition, in the same style as the "Working Always
+  On Availability Group" and "Teardown, Rewind, and Reset-Baseline" entries
+  (what was added, why planned vs. forced are separate code paths, and
+  whether it's been live-tested against the VMs yet or only
+  syntax-checked/implemented).
+
 ## Run it — CLI
 
 **All-in-one** (precheck is built into `failover.yml` itself — it verifies

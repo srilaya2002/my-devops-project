@@ -376,3 +376,80 @@ async def get_rewind_plan():
     except Exception as e:
         logger.error(f"Error retrieving rewind plan: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve rewind plan: {str(e)}")
+
+@router.post("/ag-status")
+async def deploy_ag_status(background_tasks: BackgroundTasks):
+    """Snapshot the Always On AG's replica roles and sync state. Read-only, safe any time."""
+    logger.info("Received deployment request - AG status")
+    try:
+        task_id = deployer.start_task("ag-status")
+        background_tasks.add_task(deployer.deploy_ag_status, task_id)
+        return {
+            "status": "initiated",
+            "task_id": task_id,
+            "message": "AG status check started",
+            "engine": "ansible",
+            "playbook": "ag_status.yml",
+            "estimated_duration_minutes": 1,
+        }
+    except Exception as e:
+        logger.error(f"Error checking AG status: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to check AG status: {str(e)}")
+
+
+@router.post("/failover")
+async def deploy_failover(background_tasks: BackgroundTasks, target: str, mode: str = "planned"):
+    """Fail the Always On AG over to `target` ('vm1' or 'vm2').
+
+    mode=planned (default) requires target to already be SYNCHRONIZED -- no data loss.
+    mode=forced uses FORCE_FAILOVER_ALLOW_DATA_LOSS -- only when the current primary is unreachable.
+    """
+    if target not in ("vm1", "vm2"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target must be 'vm1' or 'vm2'")
+    if mode not in ("planned", "forced"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be 'planned' or 'forced'")
+
+    logger.info(f"Received deployment request - Failover to {target} ({mode})")
+    try:
+        task_id = deployer.start_task(f"failover-{target}-{mode}")
+        background_tasks.add_task(deployer.deploy_failover, task_id, target, mode)
+        return {
+            "status": "initiated",
+            "task_id": task_id,
+            "message": f"Failover to {target} ({mode}) started",
+            "engine": "ansible",
+            "playbook": "failover.yml",
+            "target": target,
+            "mode": mode,
+            "estimated_duration_minutes": 3,
+        }
+    except Exception as e:
+        logger.error(f"Error initiating failover: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to initiate failover: {str(e)}")        
+
+@router.post("/sync-rebuild")
+async def deploy_sync_rebuild(background_tasks: BackgroundTasks, target: str):
+    """Resynchronize or rejoin `target` ('vm1' or 'vm2') to the Always On AG.
+
+    Resumes suspended data movement if the replica is still a member, or
+    rejoins (and lets automatic seeding reseed it) if it fell out of the AG.
+    """
+    if target not in ("vm1", "vm2"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target must be 'vm1' or 'vm2'")
+
+    logger.info(f"Received deployment request - Sync rebuild {target}")
+    try:
+        task_id = deployer.start_task(f"sync-rebuild-{target}")
+        background_tasks.add_task(deployer.deploy_sync_rebuild, task_id, target)
+        return {
+            "status": "initiated",
+            "task_id": task_id,
+            "message": f"Sync rebuild for {target} started",
+            "engine": "ansible",
+            "playbook": "sync_rebuild.yml",
+            "target": target,
+            "estimated_duration_minutes": 15,
+        }
+    except Exception as e:
+        logger.error(f"Error initiating sync rebuild: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to initiate sync rebuild: {str(e)}")
