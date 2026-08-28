@@ -1,0 +1,13 @@
+---
+- name: Snapshot Always On AG status
+  hosts: mssql_servers
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Run AG status tasks
+      include_role:
+        name: mssql
+        tasks_from: ag_status.yml
+      tags:
+        - ag_status
