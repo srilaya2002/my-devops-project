@@ -28,10 +28,42 @@
   tags:
     - ag_status
 
+- name: Query Availability Group-level health
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ags.primary_replica, ags.synchronization_health_desc, ags.primary_recovery_health_desc, ags.secondary_recovery_health_desc FROM sys.dm_hadr_availability_group_states ags"
+  register: group_state
+  changed_when: false
+  tags:
+    - ag_status
+
+- name: Check the SQL Server error log for recent AlwaysOn errors on this replica
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; CREATE TABLE #errlog (LogDate datetime, ProcessInfo nvarchar(50), Text nvarchar(4000)); INSERT INTO #errlog EXEC master.dbo.xp_readerrorlog 0, 1, N'AlwaysOn'; SELECT TOP 10 CONVERT(varchar, LogDate, 120) + ' | ' + Text FROM #errlog ORDER BY LogDate DESC; DROP TABLE #errlog"
+  register: errorlog_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - ag_status
+
+- name: Check AG replication endpoint reachability to the partner replica
+  wait_for:
+    host: "{{ hostvars[(groups['mssql_servers'] | difference([inventory_hostname]))[0]].ansible_host }}"
+    port: "{{ ag_port }}"
+    timeout: 5
+    state: started
+  register: endpoint_reachability
+  ignore_errors: true
+  tags:
+    - ag_status
+
 - name: Display AG status
   debug:
     msg:
       - "Replica state: {{ replica_state.stdout }}"
       - "Database state: {{ database_state.stdout }}"
+      - "Group-level health: {{ group_state.stdout }}"
+      - "AG endpoint (port {{ ag_port }}) reachable to partner: {{ 'YES' if endpoint_reachability is succeeded else 'NO -- ' + (endpoint_reachability.msg | default('timed out')) }}"
+      - "Recent AlwaysOn error log entries:"
+      - "{{ errorlog_check.stdout_lines }}"
   tags:
     - ag_status
