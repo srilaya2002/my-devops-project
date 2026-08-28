@@ -10,6 +10,25 @@ logger = logging.getLogger(__name__)
 deployer = AnsibleMssqlDeployer()
 
 
+def _reject_if_busy() -> None:
+    """Raise 409 if a deployment task is already queued/running.
+
+    Prevents two ansible-playbook runs from firing against the same VMs at
+    once (e.g. re-submitting a POST in a second terminal tab), which causes
+    concurrent SQL Server operations to lock against each other and hang.
+    """
+    active = deployer.is_busy()
+    if active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"A deployment task is already {active['status']} "
+                f"(operation={active['operation']}, task_id={active['task_id']}). "
+                "Wait for it to finish, or check /api/v1/deploy/status, before starting another."
+            ),
+        )
+
+
 @router.get("/status")
 async def get_deployment_status():
     """Get current deployment status"""
@@ -35,7 +54,7 @@ async def deploy_install(background_tasks: BackgroundTasks):
     """
     
     logger.info("Received deployment request - Install MSSQL")
-    
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("install")
         background_tasks.add_task(deployer.deploy_install, task_id)
@@ -67,7 +86,7 @@ async def deploy_backup(background_tasks: BackgroundTasks):
     """
     
     logger.info("Received deployment request - Backup and Restore")
-    
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("backup-restore")
         background_tasks.add_task(deployer.deploy_backup_restore, task_id)
@@ -99,7 +118,7 @@ async def deploy_install_tools(background_tasks: BackgroundTasks):
     """Install MSSQL tools only (sqlcmd) without database"""
     
     logger.info("Received deployment request - Install tools only")
-    
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("install-tools")
         background_tasks.add_task(deployer.install_tools, task_id)
@@ -133,7 +152,7 @@ async def deploy_build(background_tasks: BackgroundTasks):
     """
 
     logger.info("Received deployment request - MSSQL build")
-
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("build")
         background_tasks.add_task(deployer.deploy_build, task_id)
@@ -161,7 +180,7 @@ async def deploy_restore_db(background_tasks: BackgroundTasks):
     """Restore AdventureWorks database to VM1 only."""
     
     logger.info("Received deployment request - Restore database")
-    
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("restore-adventureworks")
         background_tasks.add_task(deployer.restore_adventureworks, task_id)
@@ -193,6 +212,7 @@ async def deploy_restore_db(background_tasks: BackgroundTasks):
 async def deploy_alwayson(background_tasks: BackgroundTasks):
     """Configure Always-On Availability Group across VM1 and VM2"""
     logger.info("Received deployment request - Configure Always On")
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("alwayson")
         background_tasks.add_task(deployer.deploy_alwayson, task_id)
@@ -223,6 +243,7 @@ async def deploy_alwayson(background_tasks: BackgroundTasks):
 async def deploy_full_ag(background_tasks: BackgroundTasks):
     """Restore AdventureWorks to VM1, create a striped backup, copy to VM2, restore there, and configure AG."""
     logger.info("Received deployment request - Full AG workflow")
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("full-ag")
         background_tasks.add_task(deployer.deploy_full_ag, task_id)
@@ -306,6 +327,7 @@ async def deploy_teardown(background_tasks: BackgroundTasks):
     Leaves MSSQL installed and configured. Safe to re-run.
     """
     logger.info("Received deployment request - Teardown")
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("teardown")
         background_tasks.add_task(deployer.deploy_teardown, task_id)
@@ -329,6 +351,7 @@ async def deploy_rewind(background_tasks: BackgroundTasks):
     Leaves the lab ready to retry backup/restore/alwayson from a clean baseline.
     """
     logger.info("Received deployment request - Rewind")
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("rewind")
         background_tasks.add_task(deployer.deploy_rewind, task_id)
@@ -352,6 +375,7 @@ async def deploy_reset_baseline(background_tasks: BackgroundTasks):
     Does not reinstall -- call POST /api/v1/deploy/install afterward to rebuild.
     """
     logger.info("Received deployment request - Reset baseline")
+    _reject_if_busy()
     try:
         task_id = deployer.start_task("reset-baseline")
         background_tasks.add_task(deployer.deploy_reset_baseline, task_id)

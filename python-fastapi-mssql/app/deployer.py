@@ -50,6 +50,22 @@ class AnsibleMssqlDeployer:
         with self._lock:
             return list(self._history)
 
+    def is_busy(self) -> Optional[Dict]:
+        """Return the currently active task (queued/running), or None if idle.
+
+        Without this guard, calling a POST /deploy/* endpoint while a previous
+        one is still running spawns a second, fully independent ansible-playbook
+        subprocess against the same hosts -- two concurrent SQL Server RESTORE
+        commands then fight over an exclusive lock and one hangs indefinitely.
+        This was hit repeatedly during live testing (e.g. re-running curl in a
+        second terminal tab while the first request was still in progress).
+        """
+        with self._lock:
+            for item in self._history:
+                if item["status"] in ("queued", "running"):
+                    return item
+            return None
+
     def _record(self, record: Dict) -> None:
         with self._lock:
             self._history.insert(0, record)
