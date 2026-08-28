@@ -22,11 +22,35 @@
 - name: Take AdventureWorks out of HADR if still flagged (safety net)
   shell: |
     {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "
-    IF EXISTS (SELECT * FROM sys.databases WHERE name = 'AdventureWorks' AND is_hadr_enabled = 1)
+    IF EXISTS (SELECT * FROM sys.databases WHERE name = 'AdventureWorks' AND replica_id IS NOT NULL)
     ALTER DATABASE AdventureWorks SET HADR OFF
     "
   changed_when: false
   failed_when: false
+  tags:
+    - teardown
+
+- name: Check whether AdventureWorks is orphaned in RESTORING state
+  # Dropping the AG on a former secondary leaves its local database stuck in
+  # RESTORING (a secondary's database is always mid-redo; disconnecting it
+  # from the AG doesn't bring it online by itself). ALTER DATABASE -- and so
+  # the SET SINGLE_USER step below -- refuses to run against a RESTORING
+  # database, so without this the drop silently fails partway through while
+  # Ansible still reports the task as changed (sqlcmd doesn't fail its exit
+  # code just because a printed T-SQL statement errored).
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT state_desc FROM sys.databases WHERE name = 'AdventureWorks'"
+  register: aw_state_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - teardown
+
+- name: Bring an orphaned RESTORING AdventureWorks online before dropping it
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "RESTORE DATABASE AdventureWorks WITH RECOVERY"
+  when: (aw_state_check.stdout | trim) == 'RESTORING'
+  changed_when: true
   tags:
     - teardown
 
