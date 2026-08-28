@@ -1,0 +1,78 @@
+---
+# Manual/forced Always On AG failover.
+# Invoked with --limit against the single replica being promoted to PRIMARY.
+# failover_mode is "planned" (default -- requires the target to already be
+# SYNCHRONIZED, no data loss) or "forced" (used when the current primary is
+# unreachable; may lose unsent transactions).
+
+- name: Verify MSSQL connectivity on the failover target
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "SELECT 1"
+  register: connectivity_check
+  retries: 5
+  delay: 5
+  until: connectivity_check.rc == 0
+  changed_when: false
+  tags:
+    - failover
+
+- name: Check current role of the failover target
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ars.role_desc FROM sys.dm_hadr_availability_replica_states ars JOIN sys.availability_replicas ar ON ar.replica_id = ars.replica_id WHERE ar.replica_server_name = '{{ vmware_name }}'"
+  register: current_role
+  changed_when: false
+  tags:
+    - failover
+
+- name: Confirm target is SYNCHRONIZED before a planned failover
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT drs.synchronization_state_desc FROM sys.dm_hadr_database_replica_states drs JOIN sys.databases d ON d.database_id = drs.database_id WHERE d.name = 'AdventureWorks'"
+  register: sync_state_check
+  changed_when: false
+  when: failover_mode == 'planned' and (current_role.stdout | trim) != 'PRIMARY'
+  tags:
+    - failover
+
+- name: Fail fast if a planned failover target is not SYNCHRONIZED
+  fail:
+    msg: >-
+      Refusing a planned failover: this replica is
+      {{ sync_state_check.stdout | trim }}, not SYNCHRONIZED. Use
+      failover_mode=forced only if the current primary is genuinely
+      unreachable -- forced failover can lose data.
+  when: failover_mode == 'planned' and (current_role.stdout | trim) != 'PRIMARY' and (sync_state_check.stdout | trim) != 'SYNCHRONIZED'
+  tags:
+    - failover
+
+- name: Planned failover (no data loss)
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] FAILOVER"
+  when: failover_mode == 'planned' and (current_role.stdout | trim) != 'PRIMARY'
+  changed_when: true
+  tags:
+    - failover
+
+- name: Forced failover (may lose unsent data -- use only when the old primary is unreachable)
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] FORCE_FAILOVER_ALLOW_DATA_LOSS"
+  when: failover_mode == 'forced' and (current_role.stdout | trim) != 'PRIMARY'
+  changed_when: true
+  tags:
+    - failover
+
+- name: Wait for target to report PRIMARY
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ars.role_desc FROM sys.dm_hadr_availability_replica_states ars JOIN sys.availability_replicas ar ON ar.replica_id = ars.replica_id WHERE ar.replica_server_name = '{{ vmware_name }}'"
+  register: post_failover_role
+  retries: 12
+  delay: 5
+  until: (post_failover_role.stdout | trim) == 'PRIMARY'
+  changed_when: false
+  tags:
+    - failover
+
+- name: Display new role
+  debug:
+    msg: "This replica is now {{ post_failover_role.stdout | trim }}"
+  tags:
+    - failover
