@@ -156,6 +156,15 @@ class AnsibleMssqlDeployer:
             ),
         )
 
+    def deploy_ag_rebuild(self, task_id: str, authoritative: str) -> None:
+        self._run_task(
+            task_id,
+            lambda: self.ansible.run_playbook(
+                "ag_rebuild.yml",
+                extra_vars={**self._build_extra_vars(), "authoritative_replica": authoritative},
+            ),
+        )
+
     def deploy_build(self, task_id: str) -> None:
         """Run the MSSQL build playbook which prepares hosts and runs the mssql_build role."""
         self._run_task(task_id, lambda: self.ansible.run_playbook("build.yml", extra_vars=self._build_extra_vars()))

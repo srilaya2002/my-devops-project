@@ -1,0 +1,13 @@
+---
+- name: Rebuild the Always On Availability Group after an unrecoverable split-brain
+  hosts: mssql_servers
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Run AG rebuild tasks
+      include_role:
+        name: mssql
+        tasks_from: ag_rebuild.yml
+      tags:
+        - ag_rebuild

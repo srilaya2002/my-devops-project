@@ -351,6 +351,42 @@ async def deploy_sync_rebuild(background_tasks: BackgroundTasks, target: str):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to initiate sync rebuild: {str(e)}")
 
 
+@router.post("/ag-rebuild")
+async def deploy_ag_rebuild(background_tasks: BackgroundTasks, authoritative: str):
+    """Rebuild the Always On AG from scratch, keeping `authoritative` ('vm1' or 'vm2') as the data source.
+
+    Use this when sync-rebuild can't repair a replica in place -- e.g. a
+    split-brain where a replica keeps believing it's PRIMARY after a forced
+    failover. ALTER AVAILABILITY GROUP ... SET (ROLE = SECONDARY), which
+    sync-rebuild tries first, is undocumented/unsupported for CLUSTER_TYPE=NONE
+    AGs. This drops the AG on both replicas and recreates it with
+    `authoritative`'s current data, then rejoins the other replica fresh via
+    automatic seeding. The caller must know which replica actually has the
+    data worth keeping (usually whichever one won the DR failover) -- this
+    endpoint does not try to guess that during a live split-brain.
+    """
+    if authoritative not in ("vm1", "vm2"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="authoritative must be 'vm1' or 'vm2'")
+
+    logger.info(f"Received deployment request - AG rebuild, authoritative={authoritative}")
+    _reject_if_busy()
+    try:
+        task_id = deployer.start_task(f"ag-rebuild-{authoritative}")
+        background_tasks.add_task(deployer.deploy_ag_rebuild, task_id, authoritative)
+        return {
+            "status": "initiated",
+            "task_id": task_id,
+            "message": f"AG rebuild started, keeping {authoritative}'s data",
+            "engine": "ansible",
+            "playbook": "ag_rebuild.yml",
+            "authoritative": authoritative,
+            "estimated_duration_minutes": 5,
+        }
+    except Exception as e:
+        logger.error(f"Error initiating AG rebuild: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to initiate AG rebuild: {str(e)}")
+
+
 @router.get("/history")
 async def get_deployment_history():
     """Get deployment execution history"""

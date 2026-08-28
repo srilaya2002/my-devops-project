@@ -1,0 +1,141 @@
+---
+# Full Always On AG rebuild -- used when a replica's local AG state can't be
+# repaired in place. Discovered live: after FORCE_FAILOVER_ALLOW_DATA_LOSS,
+# the old primary keeps believing it's still PRIMARY (CLUSTER_TYPE=NONE has
+# no quorum to tell it otherwise), and ALTER AVAILABILITY GROUP ... SET
+# (ROLE = SECONDARY) -- the command sync_rebuild.yml's Path 0 tries first --
+# is undocumented and unsupported for CLUSTER_TYPE=NONE AGs (confirmed via a
+# Microsoft Q&A reporting the identical Msg 41104 on the identical command).
+# The only supported recovery in that case is to drop the AG and rebuild it.
+#
+# Dropping AVAILABILITY GROUP is normally risky on "the secondary" (Microsoft
+# docs: it can push the real primary into RESTORING) -- but during split-brain
+# BOTH replicas locally believe themselves to be PRIMARY, so a local drop on
+# either one follows the safe "drop from primary" path from that replica's own
+# point of view. Nothing here talks to the other replica during the drop.
+#
+# authoritative_replica (inventory hostname, e.g. "vm2") tells this playbook
+# which replica's current data is the one to keep -- the caller must know this
+# (usually: whichever replica actually won the DR failover). The certificate
+# and endpoint from the original build are left alone and reused (IF NOT
+# EXISTS guarded); only the AG object and the non-authoritative replica's
+# stale database copy are touched.
+
+- name: Verify MSSQL connectivity
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "SELECT 1"
+  register: connectivity_check
+  retries: 5
+  delay: 5
+  until: connectivity_check.rc == 0
+  changed_when: false
+  tags:
+    - ag_rebuild
+
+- name: Drop the Availability Group locally on this replica, if present
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "
+    IF EXISTS (SELECT * FROM sys.availability_groups WHERE name = '{{ ag_name }}')
+    DROP AVAILABILITY GROUP [{{ ag_name }}]
+    "
+  register: drop_ag_result
+  changed_when: true
+  tags:
+    - ag_rebuild
+
+- name: Drop the stale local copy of AdventureWorks on the non-authoritative replica
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "
+    IF EXISTS (SELECT * FROM sys.databases WHERE name = 'AdventureWorks')
+    BEGIN
+      ALTER DATABASE AdventureWorks SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+      DROP DATABASE AdventureWorks;
+    END
+    "
+  when: inventory_hostname != authoritative_replica
+  changed_when: true
+  tags:
+    - ag_rebuild
+
+- name: Set AdventureWorks recovery model to FULL on the authoritative replica
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER DATABASE AdventureWorks SET RECOVERY FULL"
+  when: inventory_hostname == authoritative_replica
+  changed_when: false
+  tags:
+    - ag_rebuild
+
+- name: Seed full + log backup for AdventureWorks on the authoritative replica (required for AG log chain)
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "
+    BACKUP DATABASE AdventureWorks TO DISK = '{{ backup_dir }}/aw_full_seed.bak' WITH INIT;
+    BACKUP LOG AdventureWorks TO DISK = '{{ backup_dir }}/aw_log_seed.bak' WITH INIT;
+    "
+  when: inventory_hostname == authoritative_replica
+  changed_when: true
+  tags:
+    - ag_rebuild
+
+- name: Recreate the Availability Group on the authoritative replica
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "
+    IF NOT EXISTS (SELECT * FROM sys.availability_groups WHERE name = '{{ ag_name }}')
+    CREATE AVAILABILITY GROUP [{{ ag_name }}]
+    WITH (CLUSTER_TYPE = {{ ag_cluster_type }})
+    FOR DATABASE {{ ag_databases | join(', ') }}
+    REPLICA ON
+    {% for host in groups['mssql_servers'] %}
+      N'{{ hostvars[host].vmware_name }}' WITH (ENDPOINT_URL = N'tcp://{{ hostvars[host].ansible_host }}:{{ ag_port }}', FAILOVER_MODE = {{ ag_failover_mode }}, AVAILABILITY_MODE = {{ ag_replica_mode }}, SEEDING_MODE = AUTOMATIC){{ ',' if not loop.last else '' }}
+    {% endfor %}
+    "
+  register: create_ag_result
+  changed_when: "'created' in create_ag_result.stdout or 'already exists' in create_ag_result.stdout"
+  when: inventory_hostname == authoritative_replica
+  tags:
+    - ag_rebuild
+
+- name: Rejoin the non-authoritative replica to the Availability Group
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "
+    IF NOT EXISTS (SELECT * FROM sys.dm_hadr_availability_replica_states ars JOIN sys.availability_replicas ar ON ar.replica_id = ars.replica_id WHERE ar.replica_server_name = '{{ vmware_name }}' AND ars.role_desc = 'SECONDARY')
+    ALTER AVAILABILITY GROUP [{{ ag_name }}] JOIN WITH (CLUSTER_TYPE = {{ ag_cluster_type }})
+    "
+  when: inventory_hostname != authoritative_replica
+  register: join_result
+  changed_when: "'joined' in join_result.stdout or 'already exists' in join_result.stdout"
+  tags:
+    - ag_rebuild
+
+- name: Grant automatic seeding permission on the rejoined replica
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] GRANT CREATE ANY DATABASE"
+  when: inventory_hostname != authoritative_replica
+  changed_when: true
+  tags:
+    - ag_rebuild
+
+- name: Wait for AdventureWorks to reach SYNCHRONIZED state on all replicas
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.dm_hadr_database_replica_states drs JOIN sys.databases d ON d.database_id = drs.database_id WHERE d.name = 'AdventureWorks' AND drs.synchronization_state_desc != 'SYNCHRONIZED'"
+  register: sync_wait
+  retries: 30
+  delay: 10
+  until: sync_wait.stdout | trim == '0'
+  when: inventory_hostname == authoritative_replica
+  changed_when: false
+  tags:
+    - ag_rebuild
+
+- name: Verify Availability Group state
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ar.replica_server_name, ars.role_desc, ars.synchronization_health_desc FROM sys.dm_hadr_availability_replica_states ars JOIN sys.availability_replicas ar ON ar.replica_id = ars.replica_id"
+  register: verify_ag
+  changed_when: false
+  tags:
+    - ag_rebuild
+
+- name: Display Availability Group rebuild verification
+  debug:
+    msg: "AG state: {{ verify_ag.stdout }}"
+  tags:
+    - ag_rebuild
