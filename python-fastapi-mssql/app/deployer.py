@@ -133,6 +133,29 @@ class AnsibleMssqlDeployer:
 
         return results
 
+    def deploy_ag_status(self, task_id: str) -> None:
+        self._run_task(task_id, lambda: self.ansible.run_playbook("ag_status.yml", extra_vars=self._build_extra_vars()))
+
+    def deploy_failover(self, task_id: str, target: str, mode: str = "planned") -> None:
+        self._run_task(
+            task_id,
+            lambda: self.ansible.run_playbook(
+                "failover.yml",
+                limit=target,
+                extra_vars={**self._build_extra_vars(), "failover_mode": mode},
+            ),
+        )
+
+    def deploy_sync_rebuild(self, task_id: str, target: str) -> None:
+        self._run_task(
+            task_id,
+            lambda: self.ansible.run_playbook(
+                "sync_rebuild.yml",
+                limit=target,
+                extra_vars=self._build_extra_vars(),
+            ),
+        )
+
     def deploy_build(self, task_id: str) -> None:
         """Run the MSSQL build playbook which prepares hosts and runs the mssql_build role."""
         self._run_task(task_id, lambda: self.ansible.run_playbook("build.yml", extra_vars=self._build_extra_vars()))
