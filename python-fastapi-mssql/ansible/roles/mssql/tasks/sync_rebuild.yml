@@ -14,6 +14,38 @@
   tags:
     - sync_rebuild
 
+# --- Path 0: split-brain -- this replica still thinks it's PRIMARY ---
+# Can happen after a forced failover elsewhere while this replica stayed up:
+# with CLUSTER_TYPE=NONE there's no quorum to arbitrate, so a replica that
+# was never told to step down keeps believing it's still primary. If left
+# alone, the membership/suspended checks below both look "healthy" (it IS a
+# member, and it ISN'T suspended -- it's just wrong about its own role), so
+# nothing else in this file would ever fix it and the sync-wait at the end
+# would fail forever.
+
+- name: Check whether this replica currently believes it is PRIMARY (possible split-brain)
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ars.role_desc FROM sys.dm_hadr_availability_replica_states ars JOIN sys.availability_replicas ar ON ar.replica_id = ars.replica_id WHERE ar.replica_server_name = '{{ vmware_name }}'"
+  register: role_check
+  changed_when: false
+  tags:
+    - sync_rebuild
+
+- name: Force this replica out of a stale PRIMARY role so it can rejoin as SECONDARY
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] SET (ROLE = SECONDARY)"
+  when: (role_check.stdout | trim) == 'PRIMARY'
+  changed_when: true
+  tags:
+    - sync_rebuild
+
+- name: Give the role change a moment to settle before re-checking state
+  pause:
+    seconds: 5
+  when: (role_check.stdout | trim) == 'PRIMARY'
+  tags:
+    - sync_rebuild
+
 - name: Check whether this replica is currently a member of the AG
   shell: |
     {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.availability_replicas ar WHERE ar.replica_server_name = '{{ vmware_name }}' AND EXISTS (SELECT 1 FROM sys.dm_hadr_availability_replica_states ars WHERE ars.replica_id = ar.replica_id)"
