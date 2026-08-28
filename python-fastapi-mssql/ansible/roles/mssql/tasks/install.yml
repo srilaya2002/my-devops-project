@@ -64,15 +64,21 @@
     - install
     - tools
 
-- name: Check whether MSSQL has already been configured
-  stat:
-    path: /var/opt/mssql/mssql.conf
-  register: mssql_config
+- name: Check whether MSSQL Server is already active and licensed
+  # NOTE: checking for /var/opt/mssql/mssql.conf here used to cause setup to be
+  # skipped -- the RPM package creates that file on install, before the EULA/SA
+  # password setup has ever run, which left mssql-server crash-looping with
+  # "EULA must be accepted" and never opening the SQL port. Checking the actual
+  # service state is a reliable signal that setup has genuinely completed.
+  command: systemctl is-active mssql-server
+  register: mssql_service_active
+  failed_when: false
+  changed_when: false
   tags:
     - install
     - setup
 
-- name: Run MSSQL setup/configuration
+- name: Run MSSQL setup/configuration (accepts EULA, sets SA password)
   shell: |
     MSSQL_SA_PASSWORD='{{ sa_password }}' \
     MSSQL_PID='{{ mssql_edition }}' \
@@ -81,7 +87,7 @@
     ACCEPT_EULA: "Y"
     MSSQL_SA_PASSWORD: "{{ sa_password }}"
     MSSQL_PID: "{{ mssql_edition }}"
-  when: not mssql_config.stat.exists
+  when: mssql_service_active.stdout | trim != 'active'
   tags:
     - install
     - setup
@@ -99,7 +105,7 @@
   wait_for:
     port: "{{ mssql_port }}"
     delay: 10
-    timeout: 60
+    timeout: 120
   tags:
     - install
     - service
