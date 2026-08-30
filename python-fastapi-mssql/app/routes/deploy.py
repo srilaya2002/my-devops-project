@@ -192,6 +192,14 @@ async def deploy_restore_db(background_tasks: BackgroundTasks):
 @router.post("/alwayson")
 async def deploy_alwayson(background_tasks: BackgroundTasks):
     """Configure Always-On Availability Group across VM1 and VM2"""
+    in_progress = deployer.ag_operation_in_progress()
+    if in_progress:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Another AG-mutating operation ('{in_progress}') is already running -- "
+                   f"wait for it to finish before starting this one.",
+        )
+
     logger.info("Received deployment request - Configure Always On")
     try:
         task_id = deployer.start_task("alwayson")
@@ -222,6 +230,14 @@ async def deploy_alwayson(background_tasks: BackgroundTasks):
 @router.post("/full-ag")
 async def deploy_full_ag(background_tasks: BackgroundTasks):
     """Restore AdventureWorks to VM1, create a striped backup, copy to VM2, restore there, and configure AG."""
+    in_progress = deployer.ag_operation_in_progress()
+    if in_progress:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Another AG-mutating operation ('{in_progress}') is already running -- "
+                   f"wait for it to finish before starting this one.",
+        )
+
     logger.info("Received deployment request - Full AG workflow")
     try:
         task_id = deployer.start_task("full-ag")
@@ -409,6 +425,14 @@ async def deploy_failover(background_tasks: BackgroundTasks, target: str, mode: 
     if mode not in ("planned", "forced"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be 'planned' or 'forced'")
 
+    in_progress = deployer.ag_operation_in_progress()
+    if in_progress:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Another AG-mutating operation ('{in_progress}') is already running -- "
+                   f"wait for it to finish before starting a failover.",
+        )
+
     logger.info(f"Received deployment request - Failover to {target} ({mode})")
     try:
         task_id = deployer.start_task(f"failover-{target}-{mode}")
@@ -436,6 +460,14 @@ async def deploy_sync_rebuild(background_tasks: BackgroundTasks, target: str):
     """
     if target not in ("vm1", "vm2"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target must be 'vm1' or 'vm2'")
+
+    in_progress = deployer.ag_operation_in_progress()
+    if in_progress:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Another AG-mutating operation ('{in_progress}') is already running -- "
+                   f"wait for it to finish before starting a sync rebuild.",
+        )
 
     logger.info(f"Received deployment request - Sync rebuild {target}")
     try:

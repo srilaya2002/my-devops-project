@@ -26,6 +26,8 @@ class SequenceStepError(RuntimeError):
 class AnsibleMssqlDeployer:
     """Deploy MSSQL using Ansible playbooks."""
 
+    AG_MUTATING_OPERATIONS = ("failover", "sync-rebuild", "alwayson", "full-ag")
+
     def __init__(self) -> None:
         self.ansible = AnsibleRunner()
         self._history: List[Dict] = []
@@ -49,6 +51,14 @@ class AnsibleMssqlDeployer:
     def get_history(self) -> List[Dict]:
         with self._lock:
             return list(self._history)
+
+    def ag_operation_in_progress(self) -> Optional[str]:
+        """Operation name of a running AG-mutating task, or None if the AG is free to touch."""
+        with self._lock:
+            for task in self._history:
+                if task["status"] == "running" and task["operation"].startswith(self.AG_MUTATING_OPERATIONS):
+                    return task["operation"]
+        return None
 
     def _record(self, record: Dict) -> None:
         with self._lock:

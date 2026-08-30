@@ -456,6 +456,50 @@ async def deploy_failover(background_tasks: BackgroundTasks, target: str, mode: 
 as fillable text fields in Swagger's "Try it out" — no example schema to
 write, and it's obvious in the UI what's required.
 
+### 7a. Concurrency guard (added after the 2026-08-30 split-brain incident — see Live-testing findings)
+
+`AnsibleMssqlDeployer._lock` only ever protected the in-memory `_history`
+bookkeeping list — nothing stopped two deploy calls from launching
+concurrent `ansible-playbook` subprocesses against the same AG. A
+double-submit (e.g. clicking Swagger's "Execute" twice) could run two
+`failover.yml` invocations at once, racing each other's SQL Server calls.
+Add a check so a second AG-mutating call is rejected while one is already
+running, instead of silently racing:
+
+`app/deployer.py` — add alongside the other methods on `AnsibleMssqlDeployer`:
+
+```python
+AG_MUTATING_OPERATIONS = ("failover", "sync-rebuild", "alwayson", "full-ag")
+
+def ag_operation_in_progress(self) -> Optional[str]:
+    """Operation name of a running AG-mutating task, or None if the AG is free to touch."""
+    with self._lock:
+        for task in self._history:
+            if task["status"] == "running" and task["operation"].startswith(self.AG_MUTATING_OPERATIONS):
+                return task["operation"]
+    return None
+```
+
+`app/routes/deploy.py` — check it at the top of `deploy_failover` (after the
+`target`/`mode` validation, before `start_task`):
+
+```python
+    in_progress = deployer.ag_operation_in_progress()
+    if in_progress:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Another AG-mutating operation ('{in_progress}') is already running -- "
+                   f"wait for it to finish before starting a failover.",
+        )
+```
+
+`ag-status` deliberately isn't in `AG_MUTATING_OPERATIONS` — it's read-only
+and safe to run alongside anything else, same as `ag_status.yml` itself is
+documented to be. Apply the same `ag_operation_in_progress()` check to the
+other AG-mutating endpoints too — `/sync-rebuild`, `/alwayson`, `/full-ag`
+(in their own routes, outside this guide's file) — since a double-submit on
+any of them is the same hazard, not just on `/failover`.
+
 ### 8. Docs to update
 
 - `python-fastapi-mssql/RUNBOOK.md` — add an "AG status and failover" block
@@ -682,6 +726,235 @@ Re-tested after this fix: re-running the same `target=vm2&mode=planned`
 call end to end (old primary reachable throughout) should leave both
 replicas `SYNCHRONIZED`/`HEALTHY` with a single API call and no follow-up
 `sync-rebuild` step required.
+
+---
+
+**2026-08-30 — double-submitted failback (`target=vm1`) via Swagger raced
+two concurrent `failover.yml` runs and produced a real split-brain: both
+replicas reported themselves `PRIMARY`.**
+
+After the resync-gating fix above was in place and vm2 had been resynced to
+`SYNCHRONIZED` as primary, used Swagger to fail back to vm1
+(`target=vm1&mode=planned`). `ansible.log` shows **two separate
+`ansible-playbook` processes** both targeting `vm1`, two seconds apart
+(PIDs `16215` and `16461`, both starting ~11:22:19–21) — a double-submit,
+not a single call. Live read-only status afterward (`ag_status.yml`'s
+queries, run directly against both VMs) showed:
+
+```
+VM1's own view:
+  devops_VM1  PRIMARY   ONLINE  CONNECTED     HEALTHY
+  devops_VM2  SECONDARY  NULL   DISCONNECTED  NOT_HEALTHY
+
+VM2's own view:
+  devops_VM1  SECONDARY  NULL   DISCONNECTED  NOT_HEALTHY
+  devops_VM2  PRIMARY   ONLINE  CONNECTED     HEALTHY
+```
+
+Both nodes had their own writable, locally-`SYNCHRONIZED`/`HEALTHY`
+`AdventureWorks`, and the AG mirroring endpoint between them was
+`DISCONNECTED` on both sides — genuine split-brain, not just a suspended
+database like the earlier finding.
+
+**What happened, from the interleaved log:**
+- PID `16461` read `sys.dm_hadr_database_replica_states` at the exact
+  moment PID `16215`'s `FORCE_FAILOVER_ALLOW_DATA_LOSS` was landing on vm1,
+  got a transient two-row result (`"NOT SYNCHRONIZING\nSYNCHRONIZED"`),
+  failed its own `SYNCHRONIZED` precheck, and aborted cleanly — this
+  process did no direct damage, the existing safety check caught it.
+- PID `16215` completed: it force-promoted vm1 to `PRIMARY`. In the earlier
+  (non-concurrent) failback test, the old primary auto-demoted itself
+  cleanly at this point because the endpoint connection stayed up long
+  enough to carry that signal. This time, under contention from the second
+  concurrent process hitting vm1 at the same time, the endpoint connection
+  between vm1 and vm2 dropped instead — so vm2 never received the
+  "step down" signal and is still asserting `PRIMARY` locally.
+
+**Root cause:** `AnsibleMssqlDeployer` (`app/deployer.py`) has no mutual
+exclusion around actually *running* an AG-mutating playbook — `self._lock`
+only guards the in-memory `_history` bookkeeping dict. Nothing in the API
+stopped two `/failover` calls (or any two AG-mutating calls) from launching
+concurrent `ansible-playbook` subprocesses against the same replicas. A
+double-click on Swagger's "Execute" was enough to trigger this.
+
+**Manual recovery — proposed here, corrected below after actually running
+it.** Steps 1–4 as originally written (demote via `SET (ROLE = SECONDARY)`,
+confirm reconnect, resume if suspended, verify) turned out not to work as
+described — see the next entry for what actually fixed this split-brain,
+step by step, with the real commands used.
+
+**Fix to prevent recurrence — implemented, not just proposed.** The
+concurrency guard from step 7a is now live in
+`python-fastapi-mssql/app/deployer.py` (`AG_MUTATING_OPERATIONS` +
+`ag_operation_in_progress()`) and `python-fastapi-mssql/app/routes/deploy.py`
+(a 409 check added to `/failover`, `/sync-rebuild`, `/alwayson`, and
+`/full-ag`). This doesn't fix an already-split AG by itself — that still
+needs the recovery procedure below — it stops a double-submit from being
+able to race two AG-mutating calls against each other in the first place.
+
+---
+
+**2026-08-30 — actually recovering the split-brain: `SET ROLE`, `OFFLINE`,
+and a plain `JOIN` all failed in sequence; the real fix was
+`REMOVE REPLICA`/`ADD REPLICA` on the primary plus granting seeding
+permission on the correct host.** Documented in full because every step
+here surprised us at least once — worth reading end to end before touching
+a real split-brain again.
+
+**Step 1 — `SET (ROLE = SECONDARY)` on vm2 does not work.** Tried this (the
+originally-proposed fix, above) both via SSMS and directly via `sqlcmd`
+from the CLI — identical result both times:
+```
+Msg 41104, Level 16, State 5 ... Failover of the availability group 'AG1' to
+the local replica failed because the availability group resource did not
+come online due to a previous error.
+```
+This is the *same* error `FAILOVER` gives (Msg 41104 is generic — despite
+saying "check the error log", neither VM's error log had any actual prior
+entry to check; the "previous error" text is boilerplate, not a pointer to
+something logged). Root assumption that turned out wrong: `SET ROLE` is
+**not** a lighter-weight, local-only alternative to `FAILOVER` on
+`CLUSTER_TYPE=NONE` — both go through the same internal "bring the AG
+resource online in the new role" path, and that path was refusing to
+complete because vm2 (still `PRIMARY`) had no way to reconcile state with
+vm1 (also `PRIMARY`) — no coordinated partner, no resource comes online,
+regardless of which command asks for the role change.
+
+**Step 2 — restarting `mssql-server` on vm2 doesn't reset its role either.**
+Confirmed directly in vm2's fresh error log after restart: within 2 seconds
+of starting up it replays `RESOLVING_NORMAL → RESOLVING_PENDING_FAILOVER
+("user initiated failover") → PRIMARY_PENDING → PRIMARY_NORMAL` — SQL
+Server persists a replica's last local role and resumes it on startup. A
+restart doesn't default anything to secondary; it just re-confirms whatever
+role was last held, landing right back in the same conflict a few seconds
+later.
+
+**Step 3 — ruled out network/firewall as the cause**, despite that being
+what the 41104/connection-timeout log lines suggested. Raw TCP to port 5022
+worked both directions (`VM1→VM2:5022 OK`, `VM2→VM1:5022 OK`), `firewalld`
+had `5022/tcp` open on both VMs, both instances were genuinely listening.
+The mirroring endpoint's *handshake* was refusing to complete because both
+sides were asserting `PRIMARY` — SQL Server reports that as a generic
+timeout rather than "split-brain detected, refusing connection."
+
+**Step 4 — `ALTER AVAILABILITY GROUP [AG1] OFFLINE` (local-only, no
+partner coordination needed) is what actually broke the deadlock.** Run on
+vm2:
+```sql
+ALTER AVAILABILITY GROUP [AG1] OFFLINE;
+```
+This succeeded immediately and got vm1 to correctly see vm2 as
+`SECONDARY`/`CONNECTED` again (checked from vm1: no more rival `PRIMARY`).
+But vm2 itself was left stuck `RESOLVING`/`OFFLINE` — not a proper
+`SECONDARY` — because rejoining still needed the next steps.
+
+**Step 5 — a plain `JOIN` fails with 41106 because the local replica
+object still exists (just offline, not gone):**
+```
+Msg 41106 ... An availability replica of the specified availability group
+already exists on this instance of SQL Server ... To remove the existing
+availability replica, run DROP AVAILABILITY GROUP command.
+```
+Followed the error's own advice — `DROP AVAILABILITY GROUP [AG1]` on
+vm2 — which succeeded and left `AdventureWorks` in `RESTORING` (later
+auto-cleaned up by SQL Server on its own, so the usual
+`sync_rebuild.yml`-style "drop the stale standalone copy" step turned out
+to be unnecessary here). Catalog now showed 0 availability groups on vm2.
+
+**Step 6 — even with a clean catalog, `JOIN` still failed with 41106.**
+This was the most surprising part: `sys.availability_groups` on vm2
+genuinely showed 0 rows, yet `ALTER AVAILABILITY GROUP [AG1] JOIN WITH
+(CLUSTER_TYPE = NONE)` still hit the identical "replica already exists"
+error. Conclusion: there's a **stale in-memory Always On cache on the
+secondary that a catalog-level `DROP AVAILABILITY GROUP` doesn't clear**,
+distinct from the persisted catalog metadata. Also: **the AG definition
+propagates from primary to secondary automatically once the endpoint
+reconnects** — as long as vm1 still listed `devops_VM2` as a declared
+replica, vm2 kept re-acquiring a phantom replica object on every attempt to
+reconnect, regardless of what was dropped locally on vm2's side. `DROP
+AVAILABILITY GROUP` on the secondary alone can't win against that — the
+secondary has to actually be removed from the *primary's* declared AG
+membership first.
+
+**Step 7 — the fix that actually worked: remove and re-add the replica
+from the primary side, then rejoin from the secondary.**
+```sql
+-- on vm1 (primary) -- removes vm2 from AG1's authoritative membership
+ALTER AVAILABILITY GROUP [AG1] REMOVE REPLICA ON N'devops_VM2';
+
+-- on vm2 (secondary) -- now sticks, since vm1 no longer re-declares vm2 a member
+DROP AVAILABILITY GROUP [AG1];
+
+-- on vm1 (primary) -- re-add with the exact same definition alwayson.yml used originally
+ALTER AVAILABILITY GROUP [AG1] ADD REPLICA ON N'devops_VM2'
+  WITH (ENDPOINT_URL = N'tcp://192.168.70.130:5022', FAILOVER_MODE = MANUAL,
+        AVAILABILITY_MODE = SYNCHRONOUS_COMMIT, SEEDING_MODE = AUTOMATIC);
+
+-- on vm2 (secondary) -- now succeeds cleanly, no 41106
+ALTER AVAILABILITY GROUP [AG1] JOIN WITH (CLUSTER_TYPE = NONE);
+```
+`JOIN` returned clean (no error) and vm2 immediately showed
+`SECONDARY`/`ONLINE`/`CONNECTED` — the split-brain itself was fully
+resolved at this point. (`ADD REPLICA` also assigns vm2 a fresh internal
+replica GUID, visible in the error log as a different ID than before —
+expected, not a problem.)
+
+**Step 8 — `AdventureWorks` still wouldn't seed onto vm2:
+`sys.dm_hadr_automatic_seeding` showed repeated `FAILED — Request Denied`.**
+Ruled out filesystem permissions first (`/var/opt/mssql/data` on vm2 was
+correctly `mssql:mssql` owned — not the cause). The real reason was sitting
+in plain text in **vm2's own error log** (not vm1's):
+```
+Local availability replica for availability group 'AG1' has not been
+granted permission to create databases, but has a SEEDING_MODE of
+AUTOMATIC. Use the ALTER AVAILABILITY GROUP ... GRANT CREATE ANY DATABASE
+command to allow the creation of databases seeded by the primary
+availability replica.
+```
+**`GRANT CREATE ANY DATABASE` is a per-replica, local grant — it has to run
+on the replica that's *receiving* the seeded database (vm2), not the
+primary that's sending it (vm1).** This matches what `alwayson.yml` and
+`sync_rebuild.yml` already do correctly (the task is literally named
+"Grant automatic seeding permission on secondary" in `alwayson.yml`, and
+`sync_rebuild.yml` runs `sqlcmd -S localhost` scoped to whatever host
+`--limit` targets) — but doing this by hand, it's easy to run it on
+whichever VM's `sqlcmd` session happens to be open (vm1, since that's where
+the rest of the recovery commands were run) and get a silent-looking
+success (`GRANT` itself always returns cleanly regardless of which replica
+you run it on) while it does nothing for the replica that actually needs
+it. Running the exact same grant on vm2 instead:
+```sql
+-- on vm2, not vm1
+ALTER AVAILABILITY GROUP [AG1] GRANT CREATE ANY DATABASE;
+```
+fixed it immediately — automatic seeding had stopped retrying on its own
+after enough consecutive failures, so a fresh attempt also had to be forced
+by toggling `SEEDING_MODE` off and back on for vm2's replica (run from
+vm1, the primary, which owns the AG's replica definitions):
+```sql
+ALTER AVAILABILITY GROUP [AG1] MODIFY REPLICA ON N'devops_VM2' WITH (SEEDING_MODE = MANUAL);
+ALTER AVAILABILITY GROUP [AG1] MODIFY REPLICA ON N'devops_VM2' WITH (SEEDING_MODE = AUTOMATIC);
+```
+`AdventureWorks` appeared on vm2 within about 10 seconds and reached
+`SYNCHRONIZED`/`HEALTHY` shortly after — confirmed stable on both VMs:
+`devops_VM1 PRIMARY/HEALTHY`, `devops_VM2 SECONDARY/HEALTHY`,
+`AdventureWorks SYNCHRONIZED` on both sides.
+
+**Takeaways for next time:**
+- `SET ROLE` is not a safe alternative to `FAILOVER` for breaking a
+  split-brain on `CLUSTER_TYPE=NONE` — neither can coordinate a role change
+  without a working partner connection, so both fail identically.
+- A stuck local AG resource needs `OFFLINE` (local-only), not a service
+  restart (which just resumes the same stuck role) and not `SET ROLE`
+  (which needs the same broken coordination `FAILOVER` does).
+- A catalog-level `DROP AVAILABILITY GROUP` on a secondary is not durable
+  against a primary that still declares it a member — remove the replica
+  from the **primary's** membership first (`REMOVE REPLICA`), or it keeps
+  getting silently re-declared as connectivity comes back.
+- Any `GRANT`/permission-style AG command needs to be run on the
+  **specific replica the permission is for**, not wherever you happen to
+  have a session open — `GRANT` always returns success regardless of host,
+  so running it on the wrong VM fails silently rather than erroring.
 
 ## What this lab's DR setup doesn't cover
 
