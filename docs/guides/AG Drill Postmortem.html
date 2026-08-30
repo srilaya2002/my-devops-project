@@ -1,0 +1,818 @@
+
+<!-- saved from url=(0187)file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>AG Drill Postmortem</title>
+<meta name="description" content="Every bug found and fixed while running a live MSSQL Always On DR drill — failover, sync-rebuild, and teardown — against real VMs.">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Work+Sans:wght@400;500;600&display=swap');
+
+  :root{
+    --bg: #080d0c;
+    --bg-grid: #0c1512;
+    --surface: #0f1916;
+    --surface-2: #15221e;
+    --ink: #eaf3ee;
+    --ink-muted: #90a9a1;
+    --ink-faint: #5c766e;
+    --rule: #1f322c;
+    --accent: #4fe0c8;
+    --accent-ink: #04120e;
+    --accent-glow: rgba(79,224,200,0.28);
+    --code-bg: #060b0a;
+    --code-ink: #d9ede6;
+    --code-muted: #567169;
+
+    --fixed: #6be79a;
+    --fixed-bg: #102a1a;
+    --fixed-border: rgba(107,231,154,0.4);
+    --limitation: #ffbd62;
+    --limitation-bg: #2c2007;
+    --limitation-border: rgba(255,189,98,0.4);
+    --falsepos: #ff7a68;
+    --falsepos-bg: #2c1310;
+    --falsepos-border: rgba(255,122,104,0.42);
+  }
+
+  *{ box-sizing: border-box; }
+  html{ scroll-behavior: smooth; }
+  body{
+    margin: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 15% 0%, rgba(79,224,200,0.07), transparent 60%),
+      var(--bg);
+    color: var(--ink);
+    font-family: 'Work Sans', ui-sans-serif, system-ui, sans-serif;
+    font-size: 16.5px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,h2,h3{
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 700;
+    text-wrap: balance;
+    color: var(--ink);
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  a{ color: var(--accent); }
+  code, .mono{ font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+  ::selection{ background: var(--accent-glow); color: var(--ink); }
+
+  .shell{
+    display: grid;
+    grid-template-columns: 250px minmax(0,1fr);
+    gap: 0;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px){ .shell{ grid-template-columns: 1fr; } }
+
+  /* ---- TOC rail ---- */
+  .toc{
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2.75rem 1.25rem 2rem 1.75rem;
+    border-right: 1px solid var(--rule);
+    background: linear-gradient(180deg, rgba(79,224,200,0.04), transparent 18%);
+  }
+  @media (max-width: 900px){
+    .toc{ position: static; height: auto; border-right: none; border-bottom: 1px solid var(--rule); padding: 1.5rem 1.5rem; }
+  }
+  .toc-label{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .toc-label::before{ content: "//"; color: var(--ink-faint); }
+  .toc ol{ list-style: none; margin: 0; padding: 0; counter-reset: toc; display: flex; flex-direction: column; gap: 0.1rem; }
+  .toc li{ counter-increment: toc; }
+  .toc a{
+    display: flex;
+    gap: 0.6rem;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--ink-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.84rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+    border-left: 2px solid transparent;
+    transition: color .12s, border-color .12s, background .12s;
+  }
+  .toc a:hover{ background: var(--surface-2); color: var(--ink); border-left-color: var(--accent); }
+  .toc a::before{
+    content: counter(toc, decimal-leading-zero);
+    font-size: 0.72rem;
+    color: var(--accent);
+    flex: none;
+  }
+
+  main{ padding: 3rem clamp(1.25rem, 4vw, 3.5rem) 5rem; min-width: 0; }
+
+  /* ---- Header ---- */
+  .doc-head{ max-width: 48rem; margin-bottom: 2.6rem; }
+  .doc-head .kicker{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+    border: 1px solid var(--fixed-border);
+    border-radius: 999px;
+    background: var(--fixed-bg);
+    color: var(--fixed);
+  }
+  .kicker .dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--fixed); box-shadow: 0 0 8px var(--fixed); }
+  .doc-head h1{
+    font-size: clamp(2.05rem, 4.4vw, 3rem);
+    line-height: 1.12;
+    margin-bottom: 1rem;
+    text-shadow: 0 0 42px var(--accent-glow);
+  }
+  .doc-head .dek{ color: var(--ink-muted); font-size: 1.1rem; max-width: 42rem; margin: 0; }
+  .doc-meta{
+    margin-top: 1.6rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.6rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+  }
+  .doc-meta b{ color: var(--ink-muted); font-weight: 500; }
+
+  /* ---- stat strip ---- */
+  .stats{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    overflow: hidden;
+    max-width: 48rem;
+    margin: 2rem 0 0;
+    box-shadow: 0 0 0 1px rgba(79,224,200,0.06), 0 18px 40px -24px rgba(0,0,0,0.7);
+  }
+  .stat{ background: var(--surface); padding: 1.05rem 1.2rem; position: relative; }
+  .stat .n{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.85rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    text-shadow: 0 0 22px var(--accent-glow);
+  }
+  .stat .l{ font-size: 0.74rem; color: var(--ink-muted); margin-top: 0.2rem; }
+
+  section.block{ max-width: 48rem; margin: 4rem 0 0; }
+  section.block:first-of-type{ margin-top: 3.2rem; }
+  .block-head{ margin-bottom: 1.3rem; }
+  .block-eyebrow{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.6rem;
+  }
+  .block-head h2{ font-size: 1.6rem; }
+  .block-intro{ color: var(--ink-muted); margin-top: 0.65rem; }
+
+  /* ---- issue card ---- */
+  .issue{
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--rule);
+    border-radius: 12px;
+    background: var(--surface);
+    margin-top: 1.5rem;
+    overflow: hidden;
+    box-shadow: 0 22px 44px -30px rgba(0,0,0,0.85);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .issue:hover{ border-left-color: var(--accent); }
+  .issue.sev-fixed{ border-left-color: var(--fixed); }
+  .issue.sev-limitation{ border-left-color: var(--limitation); }
+  .issue.sev-falsepos{ border-left-color: var(--falsepos); }
+
+  .issue-head{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.25rem 1.5rem 1.05rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .issue-head h3{ font-size: 1.08rem; line-height: 1.4; font-weight: 600; }
+  .chip{
+    flex: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0.32rem 0.65rem;
+    border-radius: 999px;
+    white-space: nowrap;
+    font-weight: 700;
+    border: 1px solid transparent;
+  }
+  .chip.fixed{ background: var(--fixed-bg); color: var(--fixed); border-color: var(--fixed-border); }
+  .chip.limitation{ background: var(--limitation-bg); color: var(--limitation); border-color: var(--limitation-border); }
+  .chip.falsepos{ background: var(--falsepos-bg); color: var(--falsepos); border-color: var(--falsepos-border); }
+
+  .issue-body{ padding: 1.3rem 1.5rem 1.6rem; }
+  .field{ margin-top: 1.1rem; }
+  .field:first-child{ margin-top: 0; }
+  .field-label{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.45rem;
+  }
+  .field p{ margin: 0; color: var(--ink); }
+  .field p + p{ margin-top: 0.6rem; }
+
+  /* ---- terminal-chrome code boxes ---- */
+  .termbox{
+    margin-top: 0.65rem;
+    border-radius: 9px;
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    box-shadow: inset 0 0 0 1px rgba(79,224,200,0.05);
+  }
+  .termbar{
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.8rem;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--rule);
+  }
+  .termbar .dots{ display: flex; gap: 0.34rem; }
+  .termbar .dots span{ width: 9px; height: 9px; border-radius: 50%; display: block; }
+  .termbar .dots span:nth-child(1){ background: #ff6b5b; }
+  .termbar .dots span:nth-child(2){ background: #ffbd62; }
+  .termbar .dots span:nth-child(3){ background: #6be79a; }
+  .termbar .label{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    margin-left: 0.2rem;
+  }
+  pre{
+    background: var(--code-bg);
+    color: var(--code-ink);
+    margin: 0;
+    padding: 0.9rem 1.05rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.6;
+  }
+  pre code{ font-family: 'JetBrains Mono', monospace; background: none; }
+  .err{ color: var(--falsepos); }
+  .ok{ color: var(--fixed); }
+  .cmt{ color: var(--code-muted); }
+  code.inline{
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    padding: 0.1rem 0.4rem;
+    border-radius: 5px;
+    font-size: 0.87em;
+    color: var(--accent);
+  }
+
+  .commit-tag{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.15rem 0.6rem;
+    margin-top: 1.2rem;
+    padding: 0.7rem 0.9rem;
+    border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    width: 100%;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+  }
+  .commit-tag .hash{ color: var(--accent); font-weight: 700; }
+  .commit-tag .msg{ color: var(--ink-muted); }
+
+  /* ---- featured root problem ---- */
+  .featured{
+    border: 1px solid var(--accent);
+    border-left: 3px solid var(--accent);
+    background:
+      radial-gradient(ellipse 100% 100% at 0% 0%, rgba(79,224,200,0.09), transparent 60%),
+      var(--surface);
+    box-shadow: 0 0 0 1px rgba(79,224,200,0.12), 0 30px 60px -30px rgba(0,0,0,0.9);
+  }
+  .featured .chip{ background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  /* ---- callout ---- */
+  .callout{
+    max-width: 48rem;
+    margin-top: 4rem;
+    border: 1px solid var(--limitation-border);
+    border-left: 3px solid var(--limitation);
+    background: var(--limitation-bg);
+    border-radius: 0 12px 12px 0;
+    padding: 1.5rem 1.7rem;
+    box-shadow: 0 24px 50px -34px rgba(0,0,0,0.8);
+  }
+  .callout .block-eyebrow{ color: var(--limitation); }
+  .callout h3{ color: var(--ink); }
+  .callout ul{ margin: 0.8rem 0 0; padding-left: 1.2rem; }
+  .callout li{ margin-top: 0.55rem; color: var(--ink); }
+  .callout li b{ color: var(--limitation); }
+
+  /* ---- outcome ---- */
+  .outcome{
+    max-width: 48rem;
+    margin-top: 4rem;
+    background:
+      radial-gradient(ellipse 90% 100% at 100% 0%, rgba(107,231,154,0.09), transparent 60%),
+      var(--surface);
+    border: 1px solid var(--fixed-border);
+    border-radius: 14px;
+    padding: 1.9rem 2rem;
+    box-shadow: 0 30px 60px -34px rgba(0,0,0,0.9);
+  }
+  .outcome-grid{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
+    gap: 1rem;
+    margin-top: 1.3rem;
+  }
+  .outcome-item{
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    font-size: 0.93rem;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .outcome-item .tick{ color: var(--fixed); font-weight: 800; flex: none; text-shadow: 0 0 10px rgba(107,231,154,0.6); }
+
+  footer{
+    max-width: 48rem;
+    margin: 4.5rem 0 0;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-faint);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+  }
+
+  a:focus-visible, .toc a:focus-visible{ outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: no-preference){
+    .doc-head{ animation: rise .5s ease-out; }
+    @keyframes rise{ from{ opacity:0; transform: translateY(8px);} to{ opacity:1; transform:none; } }
+  }
+</style>
+
+</head><body><div class="shell">
+  <nav class="toc" aria-label="Table of contents">
+    <p class="toc-label">on this page</p>
+    <ol>
+      <li><a href="file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html#root-problem">The root problem</a></li>
+      <li><a href="file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html#pre-drill">Pre-drill fixes</a></li>
+      <li><a href="file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html#failover">DR failover</a></li>
+      <li><a href="file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html#sync-rebuild">DR sync-rebuild</a></li>
+      <li><a href="file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html#teardown">Teardown</a></li>
+      <li><a href="file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html#git">Merging with a teammate</a></li>
+      <li><a href="file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html#pattern">The recurring pattern</a></li>
+      <li><a href="file:///C:/Users/mozy/AppData/Local/Packages/5319275A.WhatsAppDesktop_cv1g1gvanyjgm/LocalState/sessions/A07FD3D2B7E314157CF5327D7BB9C7146D4B4109/transfers/2026-35/ag-drill-postmortem.html#outcome">Final outcome</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="doc-head">
+      <p class="kicker"><span class="dot"></span>drill complete · 0 data lost</p>
+      <h1>What broke, and how we fixed it</h1>
+      <p class="dek">A walkthrough of every bug hit while running a real Always&nbsp;On Availability&nbsp;Group DR drill — failover, sync-rebuild, and teardown — against two live VMware Fusion VMs, plus the install-time bug that would have stopped the lab from ever building in the first place.</p>
+      <div class="doc-meta">
+        <span><b>lab:</b> devops_VM1 / devops_VM2 · MSSQL 2019 · CLUSTER_TYPE=NONE</span>
+        <span><b>date:</b> 2026-08-28</span>
+        <span><b>repo:</b> my-devops-project/python-fastapi-mssql</span>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="n">11</div><div class="l">issues found &amp; fixed</div></div>
+        <div class="stat"><div class="n">03</div><div class="l">drill steps completed</div></div>
+        <div class="stat"><div class="n">01</div><div class="l">real engine limitation</div></div>
+        <div class="stat"><div class="n">00</div><div class="l">data lost</div></div>
+      </div>
+    </header>
+
+    <!-- ROOT PROBLEM -->
+    <section class="block" id="root-problem">
+      <div class="block-head">
+        <p class="block-eyebrow">the main ansible problem</p>
+        <h2>The install step that lied about being done</h2>
+        <p class="block-intro">This is the bug that mattered most: it doesn't stop one drill step, it stops the lab from ever coming up on a fresh VM.</p>
+      </div>
+
+      <div class="issue featured">
+        <div class="issue-head">
+          <h3>install.yml skipped SQL Server setup because the wrong file was checked</h3>
+          <span class="chip">root cause</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the problem</p>
+            <p><code class="inline">install.yml</code>'s "already configured" check used <code class="inline">stat: path: /var/opt/mssql/mssql.conf</code> and skipped the setup step if that file existed. But the <code class="inline">mssql-server</code> RPM creates <code class="inline">mssql.conf</code> at package install time — before <code class="inline">mssql-conf setup</code> has ever run to accept the EULA and set the SA password.</p>
+            <p>So on a fresh VM, that file existed the moment the RPM installed, the playbook believed setup was already done, and it silently skipped the one command that actually finishes SQL Server's configuration.</p>
+            <p><b>Result:</b> <code class="inline">mssql-server</code> crash-looped, with this in the service logs, and the SQL port never opened — <code class="inline">wait_for: port 1433</code> would eventually time out with no useful error pointing at the real cause.</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">journalctl -u mssql-server</span></div>
+              <pre><code><span class="err">The SQL Server End-User License Agreement (EULA) must be accepted
+before SQL Server can start. The EULA can be accepted by running
+the setup package again with the parameter --accept-eula...</span></code></pre>
+            </div>
+          </div>
+
+          <div class="field">
+            <p class="field-label">the fix</p>
+            <p>Replaced the file-existence check with an actual service-state check:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">install.yml</span></div>
+              <pre><code><span class="cmt">- name: Check whether MSSQL Server is already active and licensed</span>
+  command: systemctl is-active mssql-server
+  register: mssql_service_active
+  failed_when: false
+  changed_when: false</code></pre>
+            </div>
+            <p style="margin-top:0.9rem;">and gated the setup step on that instead:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">install.yml</span></div>
+              <pre><code>when: mssql_service_active.stdout | trim != <span class="ok">'active'</span></code></pre>
+            </div>
+            <p style="margin-top:0.9rem;"><code class="inline">systemctl is-active</code> only returns <code class="inline">active</code> once the service is actually up and serving — which can't happen until EULA acceptance and SA password setup have genuinely completed. That's a real signal instead of a proxy that happened to be wrong.</p>
+            <p>Also bumped the post-setup <code class="inline">wait_for</code> timeout from 60s → 120s, since a first-boot <code class="inline">mssql-conf setup</code> run on this lab's hardware can take longer than 60s, and a too-short timeout would fail the play even on a run that was actually fine.</p>
+          </div>
+
+          <div class="commit-tag">
+            <span class="hash">5000930</span>
+            <span class="msg">Fix false-positive setup-skip check in mssql install.yml — 1 file changed, 13 insertions(+), 7 deletions(-)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout" style="border-color: rgba(79,224,200,0.4); border-left-color: var(--accent); background: var(--surface); margin-top: 1.5rem;">
+        <p class="block-eyebrow" style="color: var(--accent);">worth checking</p>
+        <p style="margin:0.6rem 0 0; color: var(--ink);">This fix lives only in the <code class="inline">python-fastapi-mssql/ansible/</code> tree — the FastAPI-embedded copy. <code class="inline">ansible-mssql-deploy/</code> is a separate, diverged AWX-driven tree, and wasn't touched by this commit. Worth checking whether the same false-positive check exists there too.</p>
+      </div>
+    </section>
+
+    <!-- PRE-DRILL FIXES -->
+    <section class="block" id="pre-drill">
+      <div class="block-head">
+        <p class="block-eyebrow">before the drill started</p>
+        <h2>Three more fixes already sitting uncommitted</h2>
+        <p class="block-intro">Found while reviewing the working tree before touching anything else. All reviewed, confirmed correct, and committed one at a time.</p>
+      </div>
+
+      <div class="issue sev-fixed">
+        <div class="issue-head">
+          <h3>Concurrent deployments could fight over the same lock</h3>
+          <span class="chip fixed">fixed</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the problem</p>
+            <p>Without a guard, calling a second <code class="inline">POST /deploy/*</code> while one is still running spawns a fully independent <code class="inline">ansible-playbook</code> subprocess against the same hosts. Two concurrent SQL Server <code class="inline">RESTORE</code> commands then fight over an exclusive lock and one hangs indefinitely — hit repeatedly during live testing.</p>
+          </div>
+          <div class="field">
+            <p class="field-label">the fix</p>
+            <p>Added <code class="inline">is_busy()</code> / <code class="inline">_reject_if_busy()</code> — a 409 response whenever a task is already queued or running.</p>
+          </div>
+          <div class="commit-tag"><span class="hash">24610e9</span><span class="msg">Reject a new deployment while one is already running</span></div>
+        </div>
+      </div>
+
+      <div class="issue sev-fixed">
+        <div class="issue-head">
+          <h3>vmnet2 flakiness caused intermittent SSH failures</h3>
+          <span class="chip fixed">fixed</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the problem</p>
+            <p>Contacting both VMs at once over the lab's vmnet2 network intermittently produced <code class="inline">No route to host</code> — a networking flakiness specific to this VMware Fusion setup, not a code bug.</p>
+          </div>
+          <div class="field">
+            <p class="field-label">the fix</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">ansible.cfg</span></div>
+              <pre><code><span class="cmt">[defaults]</span>
+forks = 1               <span class="cmt"># one host at a time, no more racing</span>
+<span class="cmt">[ssh_connection]</span>
+retries = 5</code></pre>
+            </div>
+          </div>
+          <div class="commit-tag"><span class="hash">b56cfb3</span><span class="msg">Serialize Ansible SSH to one host at a time to fix vmnet2 flakiness</span></div>
+        </div>
+      </div>
+
+      <div class="issue sev-fixed">
+        <div class="issue-head">
+          <h3>teardown.yml wouldn't even parse</h3>
+          <span class="chip fixed">fixed</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the problem</p>
+            <p>The file contained stray guide prose ("The connectivity gate makes it safe to call…") and a full duplicate of <code class="inline">uninstall.yml</code>'s play appended after the first valid one — invalid YAML. This would have broken both <code class="inline">POST /deploy/teardown</code> and <code class="inline">/deploy/rewind</code> (which runs teardown first), the moment either was called.</p>
+          </div>
+          <div class="field">
+            <p class="field-label">the fix</p>
+            <p>Trimmed the file back to its one valid play. Confirmed the result parses as a single valid YAML document.</p>
+          </div>
+          <div class="commit-tag"><span class="hash">5d3b752</span><span class="msg">Fix corrupted teardown.yml breaking YAML parsing</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAILOVER -->
+    <section class="block" id="failover">
+      <div class="block-head">
+        <p class="block-eyebrow">drill step 1 of 3</p>
+        <h2>DR failover</h2>
+        <p class="block-intro"><code class="inline">ag_status.yml</code> and <code class="inline">failover.yml</code> (planned + forced modes) didn't exist yet — built from the pre-written implementation guides, verified byte-for-byte against them, then run for real.</p>
+      </div>
+
+      <div class="issue sev-fixed">
+        <div class="issue-head">
+          <h3>Forced failover to vm2 — ran clean on the first attempt</h3>
+          <span class="chip fixed">no issues</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">what ran</p>
+            <p><code class="inline">POST /deploy/failover?target=vm2&amp;mode=forced</code> — used because a real DR failover assumes the primary may be unreachable. vm2 promoted to PRIMARY successfully.</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">ansible.log</span></div>
+              <pre><code>PLAY RECAP
+vm2  : ok=6  changed=1  unreachable=0  <span class="ok">failed=0</span>  skipped=3</code></pre>
+            </div>
+          </div>
+          <div class="commit-tag"><span class="hash">21bfedf</span><span class="msg">Add DR failover support (planned and forced)</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SYNC REBUILD -->
+    <section class="block" id="sync-rebuild">
+      <div class="block-head">
+        <p class="block-eyebrow">drill step 2 of 3 — the long one</p>
+        <h2>DR sync-rebuild</h2>
+        <p class="block-intro">This step failed three separate times, for three genuinely different reasons, before it actually worked. Each attempt's failure pointed at the next real cause.</p>
+      </div>
+
+      <div class="issue sev-falsepos">
+        <div class="issue-head">
+          <h3>Attempt 1 — a query that could never match</h3>
+          <span class="chip falsepos">blocking bug</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the problem</p>
+            <p>The final "wait for SYNCHRONIZED" task queried <code class="inline">sys.dm_hadr_database_replica_states</code> without scoping it to the local replica. On a 2-replica AG that returns one row <i>per replica</i> — two lines of output, not one:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">sqlcmd stdout</span></div>
+              <pre><code><span class="err">NOT SYNCHRONIZING
+SYNCHRONIZED</span></code></pre>
+            </div>
+            <p style="margin-top:0.9rem;">The task's condition did an exact string match against the whole trimmed output:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">sync_rebuild.yml</span></div>
+              <pre><code>until: (sync_wait.stdout | trim) == <span class="ok">'SYNCHRONIZED'</span></code></pre>
+            </div>
+            <p style="margin-top:0.9rem;">Two lines glued together can never equal that single word — so the task was mathematically guaranteed to burn through all 30 retries (5 minutes) and fail, regardless of whether vm1 had actually finished syncing.</p>
+          </div>
+          <div class="field">
+            <p class="field-label">the fix</p>
+            <p>Switched to the same robust pattern <code class="inline">alwayson.yml</code> already used successfully: count the rows that are <i>not</i> yet synchronized, scoped to this replica specifically, and wait for that count to hit zero.</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">sync_rebuild.yml</span></div>
+              <pre><code>SELECT COUNT(*) FROM sys.dm_hadr_database_replica_states drs
+JOIN sys.databases d ON d.database_id = drs.database_id
+JOIN sys.availability_replicas ar ON ar.replica_id = drs.replica_id
+WHERE d.name = 'AdventureWorks'
+  AND ar.replica_server_name = '{{ vmware_name }}'
+  AND drs.synchronization_state_desc != 'SYNCHRONIZED'
+<span class="cmt">-- until: (stdout | trim) == '0'</span></code></pre>
+            </div>
+          </div>
+          <div class="commit-tag"><span class="hash">991b5ed</span><span class="msg">Fix sync-rebuild wait task: scope query to this replica and use robust COUNT check</span></div>
+        </div>
+      </div>
+
+      <div class="issue sev-falsepos">
+        <div class="issue-head">
+          <h3>Attempt 2 — a "success" that changed nothing</h3>
+          <span class="chip falsepos">false positive</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the problem</p>
+            <p>The next run reported <code class="inline">failed=0</code> — but a follow-up independent <code class="inline">ag-status</code> check proved nothing had actually changed. vm1 was still reporting itself PRIMARY, byte-for-byte identical to before the run:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">ag-status</span></div>
+              <pre><code>vm1's own view:
+  devops_VM1 <span class="err">PRIMARY HEALTHY</span> / devops_VM2 SECONDARY NOT_HEALTHY
+vm2's own view:
+  devops_VM1 SECONDARY NOT_HEALTHY / devops_VM2 <span class="err">PRIMARY HEALTHY</span></code></pre>
+            </div>
+            <p style="margin-top:0.9rem;">Real split-brain. The AG has <code class="inline">CLUSTER_TYPE=NONE</code> — no quorum mechanism exists to tell the old primary it's been superseded. Since vm1 stayed reachable through the forced failover, it just kept believing it was still primary the whole time.</p>
+            <p>The fixed query from attempt 1 reported success anyway because of a genuine gap in its own logic: a primary's own row in that DMV always trivially reports itself as <code class="inline">SYNCHRONIZED</code> — a primary is "in sync with itself" by definition. The check could never distinguish "still wrongly primary" from "genuinely fixed."</p>
+          </div>
+          <div class="field">
+            <p class="field-label">the fix (first attempt)</p>
+            <p>Added a pre-check: ask the replica what role it believes it holds, and if it says PRIMARY, force it to step down before anything else runs.</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">sync_rebuild.yml</span></div>
+              <pre><code>ALTER AVAILABILITY GROUP [AG1] SET (ROLE = SECONDARY)</code></pre>
+            </div>
+          </div>
+          <div class="commit-tag"><span class="hash">0968a20</span><span class="msg">Detect and resolve split-brain in sync-rebuild before attempting resync</span></div>
+        </div>
+      </div>
+
+      <div class="issue sev-limitation">
+        <div class="issue-head">
+          <h3>Attempt 3 — the fix itself wasn't a valid command</h3>
+          <span class="chip limitation">engine limitation</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the problem</p>
+            <p>That demotion command failed outright:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">sqlcmd error</span></div>
+              <pre><code><span class="err">Msg 41104, Level 16, State 5, Server devops_VM1, Line 1
+Failover of the availability group 'AG1' to the local replica failed
+because the availability group resource did not come online due to
+a previous error.</span></code></pre>
+            </div>
+            <p style="margin-top:0.9rem;">Added three read-only diagnostics to <code class="inline">ag_status.yml</code> to investigate properly rather than guess: group-level AG health, a search of the SQL Server error log for AlwaysOn entries, and a direct TCP check of the AG's replication port (5022) between vm1 and vm2 — which ruled out a network partition (the port was reachable both directions).</p>
+            <p>A web search turned up a Microsoft Q&amp;A thread reporting the identical error on the identical command: <code class="inline">ALTER AVAILABILITY GROUP … SET (ROLE = SECONDARY)</code> is undocumented and unsupported for <code class="inline">CLUSTER_TYPE=NONE</code> availability groups — it only works on WSFC-clustered AGs. Not a bug in this playbook, and not a transcription error from the source guide either: a real SQL Server engine limitation that the guide's own untested assumption ran into.</p>
+          </div>
+          <div class="commit-tag"><span class="hash">2968133</span><span class="msg">Add group-health, error-log, and cross-replica endpoint checks to ag-status</span></div>
+        </div>
+      </div>
+
+      <div class="issue sev-fixed">
+        <div class="issue-head">
+          <h3>The real fix — rebuild the AG instead of patching it</h3>
+          <span class="chip fixed">fixed</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the fix</p>
+            <p>Since no in-place fix exists for a cluster-less AG stuck in split-brain, built a new capability instead: <code class="inline">POST /deploy/ag-rebuild?authoritative=vm1|vm2</code>. It drops the AG entirely on both replicas, discards the non-authoritative side's stale database, recreates the AG fresh from the authoritative side's current data, and rejoins the other side via automatic seeding — reusing the existing certificate and endpoint from the original build.</p>
+            <p>Dropping the AG on a replica is normally risky when run against a correctly-self-identified secondary (Microsoft's own docs: it can push the real primary into RESTORING) — but mid-split-brain, <i>both</i> replicas locally believe themselves PRIMARY, so a local drop on either one follows the documented-safe "drop from primary" path from that replica's own point of view.</p>
+          </div>
+          <div class="field">
+            <p class="field-label">result</p>
+            <p>Ran with <code class="inline">authoritative=vm2</code>. Both replicas ended up agreeing with each other — proof the split-brain was actually gone, not just hidden:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">ansible.log</span></div>
+              <pre><code>vm1's view: devops_VM1 <span class="ok">SECONDARY HEALTHY</span>
+vm2's view: devops_VM1 <span class="ok">SECONDARY HEALTHY</span> / devops_VM2 <span class="ok">PRIMARY HEALTHY</span>
+
+PLAY RECAP
+vm1 : ok=8  changed=3  <span class="ok">failed=0</span>
+vm2 : ok=9  changed=2  <span class="ok">failed=0</span></code></pre>
+            </div>
+            <p style="margin-top:0.9rem;">AdventureWorks reached SYNCHRONIZED in under 15 seconds via automatic seeding.</p>
+          </div>
+          <div class="commit-tag"><span class="hash">648f316</span><span class="msg">Add full AG rebuild capability for split-brain unrecoverable by sync-rebuild</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TEARDOWN -->
+    <section class="block" id="teardown">
+      <div class="block-head">
+        <p class="block-eyebrow">drill step 3 of 3</p>
+        <h2>Teardown</h2>
+        <p class="block-intro">Reported clean on the first run — <code class="inline">failed=0</code> on both hosts. It wasn't.</p>
+      </div>
+
+      <div class="issue sev-falsepos">
+        <div class="issue-head">
+          <h3>A green PLAY RECAP hid a database that never dropped</h3>
+          <span class="chip falsepos">false positive</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the problem</p>
+            <p>Buried inside vm1's "Drop AdventureWorks database" task, printed but not raised as a failure:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">sqlcmd error</span></div>
+              <pre><code><span class="err">Msg 5052, Level 16, State 1, Server devops_VM1, Line 4
+ALTER DATABASE is not permitted while a database is in the Restoring state.
+Msg 5069, Level 16, State 1, Server devops_VM1, Line 4
+ALTER DATABASE statement failed.</span></code></pre>
+            </div>
+            <p style="margin-top:0.9rem;">vm1 was the secondary after the AG rebuild, and a secondary's local database sits permanently in a RESTORING redo state — disconnecting it from the AG doesn't bring it online by itself. The drop task's <code class="inline">ALTER DATABASE … SET SINGLE_USER</code> step requires an online database, so it refused to run. Ansible still marked the task <code class="inline">changed: true</code> anyway, since <code class="inline">sqlcmd</code>'s exit code doesn't reflect a printed T-SQL error.</p>
+            <p>(On re-check, the database turned out to already be gone — the batch kept executing past that one failed statement and <code class="inline">DROP DATABASE</code> ran anyway. Lucky that time, not something to rely on.)</p>
+          </div>
+          <div class="field">
+            <p class="field-label">the fix</p>
+            <p>Added an explicit state check before the drop, and a recovery step for the case that actually needs it:</p>
+            <div class="termbox">
+              <div class="termbar"><span class="dots"><span></span><span></span><span></span></span><span class="label">teardown.yml</span></div>
+              <pre><code><span class="cmt">-- if state_desc == 'RESTORING':</span>
+RESTORE DATABASE AdventureWorks WITH RECOVERY</code></pre>
+            </div>
+            <p style="margin-top:0.9rem;">Also fixed an adjacent dead check in the same file — a HADR safety-net query referencing a column, <code class="inline">is_hadr_enabled</code>, that doesn't exist on <code class="inline">sys.databases</code>. Corrected to <code class="inline">replica_id IS NOT NULL</code>.</p>
+          </div>
+          <div class="field">
+            <p class="field-label">result</p>
+            <p>Re-ran teardown. Second pass confirmed clean: AG, database, endpoint, certificate, and master key all verified removed from both VMs; MSSQL itself left installed, exactly as <code class="inline">teardown.yml</code> is meant to do.</p>
+          </div>
+          <div class="commit-tag"><span class="hash">f7ea40e</span><span class="msg">Fix teardown silently failing to drop AdventureWorks on a former secondary</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GIT -->
+    <section class="block" id="git">
+      <div class="block-head">
+        <p class="block-eyebrow">after the drill</p>
+        <h2>Merging with a teammate's parallel work</h2>
+        <p class="block-intro">VS Code's Source Control panel started failing in the background partway through the session: <code class="inline">Need to specify how to reconcile divergent branches</code> — and was almost certainly the real source of the repeated <code class="inline">.git/index.lock</code> fights all session.</p>
+      </div>
+
+      <div class="issue sev-fixed">
+        <div class="issue-head">
+          <h3>Two people, the same files, no overlap where it counted</h3>
+          <span class="chip fixed">resolved</span>
+        </div>
+        <div class="issue-body">
+          <div class="field">
+            <p class="field-label">the situation</p>
+            <p>Local <code class="inline">main</code> (13 commits from this session) and <code class="inline">origin/main</code> (12 commits from a teammate, merged via GitHub) had split from the same ancestor. The teammate's commits added new MySQL replication and Oracle Data Guard guide docs — and touched several of the same DR files this session had just fixed: <code class="inline">failover.yml</code>, <code class="inline">sync_rebuild.yml</code>, <code class="inline">teardown.yml</code>, <code class="inline">deployer.py</code>, <code class="inline">deploy.py</code>.</p>
+            <p>Comparing the diffs first: the teammate's versions of those shared files were consistently earlier, less-developed drafts of the same code — missing the split-brain handling, the RESTORING fix, and the ag-rebuild endpoint. Nothing to lose by keeping ours; nothing to gain by discarding theirs.</p>
+          </div>
+          <div class="field">
+            <p class="field-label">the resolution</p>
+            <p>Merged rather than force-pushed over their work. The merge resolved with <b>zero line conflicts</b> — the changes landed in non-overlapping regions of the shared files despite touching the same filenames. Verified every fix from this session and every new guide doc from the teammate survived intact before committing.</p>
+          </div>
+          <div class="commit-tag"><span class="hash">beadf31</span><span class="msg">Merge origin/main — brings in the teammate's MySQL/Oracle DR guides alongside this session's tested MSSQL fixes</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PATTERN CALLOUT -->
+    <section class="callout" id="pattern">
+      <p class="block-eyebrow">the recurring pattern worth remembering</p>
+      <h3 style="font-size:1.22rem; margin-top:0.35rem;">Three separate times, a clean PLAY RECAP wasn't proof of anything</h3>
+      <p style="margin-top:0.65rem; color:var(--ink-muted);"><code class="inline">failed=0</code> only means Ansible's own modules didn't error — it says nothing about whether a printed SQL error, a trivially-true check, or a command that silently doesn't exist for this configuration actually did what it looked like it did.</p>
+      <ul>
+        <li><b>Sync-rebuild, attempt 2:</b> reported success while vm1 was still in split-brain — the check was trivially true, not actually verifying the fix.</li>
+        <li><b>Sync-rebuild, attempt 3:</b> the demotion command printed a fatal SQL error but Ansible's <code class="inline">changed_when</code> logic never looked at it.</li>
+        <li><b>Teardown, run 1:</b> a database drop that failed mid-batch was still marked <code class="inline">changed: true</code>, because <code class="inline">sqlcmd</code>'s exit code doesn't reflect a printed T-SQL error.</li>
+      </ul>
+      <p style="margin-top:1rem; color:var(--ink-muted);">Every one of these was only caught by reading the actual task output, or by running an independent, unrelated check afterward — not by trusting the recap line.</p>
+    </section>
+
+    <!-- OUTCOME -->
+    <section class="outcome" id="outcome">
+      <p class="block-eyebrow" style="color: var(--fixed);">final state</p>
+      <h2 style="font-size:1.4rem;">All three drill steps completed, verified against the real VMs</h2>
+      <div class="outcome-grid">
+        <div class="outcome-item"><span class="tick">✓</span> DR failover — vm2 forced to primary</div>
+        <div class="outcome-item"><span class="tick">✓</span> DR sync-rebuild — full AG rebuild, both replicas agree</div>
+        <div class="outcome-item"><span class="tick">✓</span> Teardown — AG, DB, endpoint, cert, key all removed</div>
+        <div class="outcome-item"><span class="tick">✓</span> Teammate's commits merged, nothing lost</div>
+        <div class="outcome-item"><span class="tick">✓</span> 11 real issues found and fixed, all committed individually</div>
+        <div class="outcome-item"><span class="tick">✓</span> 0 data lost across the entire drill</div>
+      </div>
+    </section>
+
+    <footer>
+      compiled from the live ansible.log output and commit history of the 2026-08-28 DR drill session against devops_VM1 / devops_VM2.
+    </footer>
+  </main>
+</div>
+</body></html>

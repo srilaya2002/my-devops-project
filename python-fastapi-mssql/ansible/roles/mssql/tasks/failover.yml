@@ -1,4 +1,7 @@
 ---
+
+
+
 # Manual/forced Always On AG failover.
 # Invoked with --limit against the single replica being promoted to PRIMARY.
 # failover_mode is "planned" (default -- requires the target to already be
@@ -44,9 +47,22 @@
   tags:
     - failover
 
+# - name: Planned failover (no data loss)
+#   shell: |
+#     {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] FAILOVER"
+#   when: failover_mode == 'planned' and (current_role.stdout | trim) != 'PRIMARY'
+#   changed_when: true
+#   tags:
+#     - failover
+
 - name: Planned failover (no data loss)
+  # CLUSTER_TYPE=NONE rejects the plain ALTER AVAILABILITY GROUP ... FAILOVER
+  # verb unconditionally (error 47122), regardless of sync state -- only
+  # FORCE_FAILOVER_ALLOW_DATA_LOSS is a legal verb on this AG type. This is
+  # still zero-data-loss: the SYNCHRONIZED precheck above is what guarantees
+  # that, not the T-SQL verb name. See "Live-testing findings" below.
   shell: |
-    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] FAILOVER"
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER AVAILABILITY GROUP [{{ ag_name }}] FORCE_FAILOVER_ALLOW_DATA_LOSS"
   when: failover_mode == 'planned' and (current_role.stdout | trim) != 'PRIMARY'
   changed_when: true
   tags:
@@ -74,5 +90,89 @@
 - name: Display new role
   debug:
     msg: "This replica is now {{ post_failover_role.stdout | trim }}"
+  tags:
+    - failover
+
+# --- Resync the old primary in place, if it's reachable ---
+# See "Live-testing findings" below for why this exists: CLUSTER_TYPE=NONE
+# forces every failover (even a "planned" one) through
+# FORCE_FAILOVER_ALLOW_DATA_LOSS, and SQL Server always suspends data
+# movement to the demoted replica's database as a precaution, even when
+# nothing actually diverged. Without this block, the old primary is left
+# NOT_HEALTHY/SUSPEND_FROM_PARTNER and someone has to separately run
+# sync_rebuild.yml against it -- folding the common case (old primary still
+# up and reachable, just suspended) in here makes this playbook
+# self-sufficient for a normal failover/failback cycle. `groups` reflects
+# full inventory membership regardless of --limit, so this works even
+# though the play itself is scoped to the promoted target.
+
+- name: Determine the old primary (the other replica in the AG)
+  set_fact:
+    old_primary_host: "{{ (groups['mssql_servers'] | difference([inventory_hostname])) | first }}"
+  when: (post_failover_role.stdout | trim) == 'PRIMARY'
+  tags:
+    - failover
+
+- name: Check connectivity to the old primary (best-effort -- it may be genuinely down)
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "SELECT 1"
+  delegate_to: "{{ old_primary_host }}"
+  register: old_primary_connectivity
+  retries: 3
+  delay: 5
+  until: old_primary_connectivity.rc == 0
+  changed_when: false
+  ignore_errors: true
+  when: (post_failover_role.stdout | trim) == 'PRIMARY'
+  tags:
+    - failover
+
+- name: Check whether the old primary's AdventureWorks data movement is suspended
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ISNULL(drs.is_suspended, 0) FROM sys.databases d LEFT JOIN sys.dm_hadr_database_replica_states drs ON drs.database_id = d.database_id WHERE d.name = 'AdventureWorks'"
+  delegate_to: "{{ old_primary_host }}"
+  register: old_primary_suspended_check
+  changed_when: false
+  when: (post_failover_role.stdout | trim) == 'PRIMARY' and old_primary_connectivity.rc == 0
+  tags:
+    - failover
+
+- name: Resume data movement on the old primary so it rejoins as a healthy secondary
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "ALTER DATABASE AdventureWorks SET HADR RESUME"
+  delegate_to: "{{ old_primary_host }}"
+  when: >-
+    (post_failover_role.stdout | trim) == 'PRIMARY' and old_primary_connectivity.rc == 0
+    and (old_primary_suspended_check.stdout | trim) == '1'
+  changed_when: true
+  tags:
+    - failover
+
+- name: Wait for the old primary's AdventureWorks to reach SYNCHRONIZED
+  shell: |
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT drs.synchronization_state_desc FROM sys.dm_hadr_database_replica_states drs JOIN sys.databases d ON d.database_id = drs.database_id WHERE d.name = 'AdventureWorks'"
+  delegate_to: "{{ old_primary_host }}"
+  register: old_primary_sync_wait
+  retries: 30
+  delay: 10
+  until: (old_primary_sync_wait.stdout | trim) == 'SYNCHRONIZED'
+  changed_when: false
+  when: (post_failover_role.stdout | trim) == 'PRIMARY' and old_primary_connectivity.rc == 0
+  tags:
+    - failover
+
+- name: Display old primary resync result
+  debug:
+    msg: >-
+      {% if old_primary_connectivity.rc == 0 %}
+      Old primary ({{ old_primary_host }}) resynced -- AdventureWorks is now
+      {{ old_primary_sync_wait.stdout | trim }}.
+      {% else %}
+      Old primary ({{ old_primary_host }}) was unreachable -- it was likely
+      genuinely down for this failover. Once it's back online, run
+      sync_rebuild.yml against it: it may need the full rejoin path
+      (Path B), not just resume, if it dropped out of the AG entirely while
+      it was down.
+      {% endif %}
   tags:
     - failover
