@@ -91,8 +91,13 @@ pattern as `failover.yml`.
 # --- Path A: still a member, just suspended ---
 
 - name: Check whether AdventureWorks data movement is suspended on this replica
+  # Filtered to this replica specifically (join sys.availability_replicas and
+  # match vmware_name) -- without it, once both replicas in the AG are
+  # healthy this DMV returns one row per replica sharing the database, not
+  # one row total, and stdout becomes e.g. "0\n0" instead of "0". See
+  # "Live-testing findings" below (2026-08-31) for what that breaks.
   shell: |
-    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ISNULL(drs.is_suspended, 0) FROM sys.databases d LEFT JOIN sys.dm_hadr_database_replica_states drs ON drs.database_id = d.database_id WHERE d.name = 'AdventureWorks'"
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ISNULL(drs.is_suspended, 0) FROM sys.databases d LEFT JOIN sys.dm_hadr_database_replica_states drs ON drs.database_id = d.database_id LEFT JOIN sys.availability_replicas ar ON ar.replica_id = drs.replica_id WHERE d.name = 'AdventureWorks' AND (ar.replica_server_name = '{{ vmware_name }}' OR ar.replica_server_name IS NULL)"
   register: suspended_check
   changed_when: false
   when: (ag_membership_check.stdout | trim) == '1'
@@ -146,8 +151,13 @@ pattern as `failover.yml`.
 # --- Verify, either path ---
 
 - name: Wait for AdventureWorks to reach SYNCHRONIZED state on this replica
+  # Same fix as the suspended-check above -- filtered to this replica via
+  # sys.availability_replicas, so stdout is a single value the `until`
+  # string-equality check can actually match. Unfiltered, this always
+  # times out (retries: 30) the moment the OTHER replica is also healthy,
+  # even though this replica itself reached SYNCHRONIZED immediately.
   shell: |
-    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT drs.synchronization_state_desc FROM sys.dm_hadr_database_replica_states drs JOIN sys.databases d ON d.database_id = drs.database_id WHERE d.name = 'AdventureWorks'"
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT drs.synchronization_state_desc FROM sys.dm_hadr_database_replica_states drs JOIN sys.databases d ON d.database_id = drs.database_id JOIN sys.availability_replicas ar ON ar.replica_id = drs.replica_id WHERE d.name = 'AdventureWorks' AND ar.replica_server_name = '{{ vmware_name }}'"
   register: sync_wait
   retries: 30
   delay: 10
@@ -311,6 +321,167 @@ curl -X POST "http://localhost:8000/api/v1/deploy/failover?target=vm1&mode=plann
 ```
 Expect the rebuilt replica's row to show `SECONDARY` / `HEALTHY` and
 `AdventureWorks` / `SYNCHRONIZED` / `is_suspended = 0`.
+
+## Live-testing findings
+
+**2026-08-31 — ran `sync-rebuild?target=vm1` against an already-healthy
+`PRIMARY` (vm1); it made zero changes but still ended `failed` after 5
+minutes, because of the multi-row query bug fixed above.**
+
+Ran it via `curl` against vm1 while vm1 was `PRIMARY`/`HEALTHY` and vm2 was
+`SECONDARY`/`HEALTHY` (both fine — this was a "does it no-op safely"
+check, not a real rebuild). Result:
+- `ag_membership_check` → `1` (correct — still a member)
+- `suspended_check` → **`"0\n0"`** — two rows, both `0`
+- Both mutating branches (Resume / drop+rejoin+grant) correctly skipped —
+  `changed: false`/`skipped` for every task, so the run made zero changes
+- Final "Wait for AdventureWorks to reach SYNCHRONIZED" polled for the
+  full 5 minutes (30 × 10s) and then failed with stdout
+  **`"SYNCHRONIZED\nSYNCHRONIZED"`** — both replicas genuinely
+  synchronized, reported correctly, and the task still failed
+
+**Root cause:** neither the `suspended_check` query nor the final
+`sync_wait` query filters `sys.dm_hadr_database_replica_states` down to a
+single replica — `failover.yml`'s equivalent queries already do this via a
+`JOIN sys.availability_replicas ar ... WHERE ar.replica_server_name =
+'{{ vmware_name }}'`, but these two queries in `sync_rebuild.yml` never got
+that filter. Once *both* replicas in the AG are healthy, this DMV returns
+one row per replica sharing the database — so the query returns 2 rows
+instead of 1, and the `until: (x.stdout | trim) == '<single value>'`
+checks can never match a two-line string, no matter how healthy the AG
+actually is. **Fix applied both here and to the actual
+`ansible/roles/mssql/tasks/sync_rebuild.yml` on disk** — confirmed working
+in the two drills below, both of which completed in seconds instead of
+timing out after 5 minutes.
+
+**Practical impact:** harmless when the target is already healthy (as
+here) — the run just wastes 5 minutes and reports a false `failed`. Not
+harmless if you're relying on the task's *return code* to drive automation
+(e.g. gating a follow-up step on `sync-rebuild` succeeding) — right now a
+perfectly healthy rebuild reports failure indistinguishable, from the
+API's perspective, from a real one.
+
+---
+
+**2026-08-31 — Path A drill: clean success in ~6 seconds, first try.**
+
+With vm1 `PRIMARY`/`HEALTHY` and vm2 `SECONDARY`/`HEALTHY`, ran
+`ALTER DATABASE AdventureWorks SET HADR SUSPEND` directly on vm2, confirmed
+`is_suspended = 1` / `NOT SYNCHRONIZING`, then called
+`sync-rebuild?target=vm2`. Result: `ag_membership_check` → `1`,
+`suspended_check` → `1` (single row, thanks to the fix above), "Resume data
+movement" ran (`changed: true`), Path B's three tasks all correctly
+skipped, final wait matched `SYNCHRONIZED` on the very first attempt.
+`ok=7, changed=1, failed=0`, done in under 6 seconds end to end. This is
+the boring, common case working exactly as designed — worth having
+actually seen it happen at least once, since every other run in this
+series so far has taken Path B or hit the query bug instead.
+
+---
+
+**2026-08-31 — Path B drill: also succeeded cleanly, in ~27 seconds, no
+manual recovery needed. This disproves the "open question" originally
+written here — see below for what that question actually was and why the
+answer turned out to be simpler than expected.**
+
+With the AG healthy again after the Path A drill, ran on vm2:
+```sql
+ALTER AVAILABILITY GROUP [AG1] OFFLINE;
+DROP AVAILABILITY GROUP [AG1];
+```
+confirmed `SELECT COUNT(*) FROM sys.availability_groups` → `0` on vm2, then
+called `sync-rebuild?target=vm2` **5 seconds later** — deliberately fast,
+to catch it before any primary-side re-propagation could plausibly kick
+in. Result: `ag_membership_check` → `0` (correctly detected as fallen out
+of the AG), "Drop a stale standalone copy" ran and hit a harmless SQL error
+(`Msg 5052: ALTER DATABASE is not permitted while a database is in the
+Restoring state` — AdventureWorks was mid-transition, not a plain
+standalone copy, so this no-op'd safely rather than actually dropping
+anything), **"Rejoin the Availability Group" (`JOIN WITH (CLUSTER_TYPE =
+NONE)`) succeeded outright — no 41106, no stale in-memory cache, no
+restart needed**, "Grant automatic seeding permission" succeeded (correctly
+scoped to vm2 via `--limit`, per the failover guide's "grant on the
+receiving replica, not the primary" finding), and the final wait matched
+`SYNCHRONIZED` on the *second* attempt (~13 seconds after `JOIN`) — seeding
+a database this small is nearly instant. `ok=8, changed=3, failed=0`.
+Confirmed both replicas `SYNCHRONIZED`/`HEALTHY` afterward with no further
+action.
+
+**Why this contradicts the "open question" this section originally posed**
+(the theory, based on the 2026-08-30 split-brain recovery, that a plain
+secondary-side `DROP` wouldn't stick because the primary would silently
+re-declare the replica): **it doesn't contradict that finding — it shows
+that finding was specific to recovering from an actual split-brain, not a
+general property of `OFFLINE`+`DROP`+`JOIN`.** The 2026-08-30 incident that
+needed `REMOVE REPLICA`/`ADD REPLICA` had a lot more going on before that
+point: two concurrent `failover.yml` runs racing each other, a genuine
+split-brain (both replicas independently `PRIMARY`), several failed `JOIN`
+attempts, and a service restart in between — plenty of opportunity for
+stale internal HADR state to accumulate beyond what a simple `DROP`
+clears. This drill started from a single, healthy, non-split AG and broke
+exactly one thing (one replica's local membership) — and the `JOIN` that
+had failed with 41106 three separate times during the split-brain recovery
+worked immediately here with no extra steps. **Conclusion: `sync_rebuild.yml`'s
+Path B, as originally written — no `ADD REPLICA` needed — is correct for
+the case it's actually meant to handle** (a replica that fell out of an
+otherwise-healthy AG). The `REMOVE REPLICA`/`ADD REPLICA` dance from the
+failover guide is a **split-brain-specific** recovery step, not something
+Path B needs to do routinely — the speculative fix proposed earlier in this
+section is **not needed** and hasn't been applied.
+
+**One real gap this drill did surface:** "Drop a stale standalone copy of
+AdventureWorks" reports `changed: true` even when its inner `sqlcmd` call
+errors out (`Msg 5052`) rather than actually dropping anything — the task's
+`changed_when: true` is unconditional, not keyed off whether the `IF
+EXISTS` block's body actually ran. Harmless here (the error was itself a
+no-op-equivalent outcome — nothing needed dropping), but worth knowing:
+this task's "changed" status can't be trusted to mean "a database was
+actually dropped."
+
+## Simulating failures to test this guide
+
+The AG has to actually be broken for `sync-rebuild` to do anything
+observable — running it against an already-healthy replica only exercises
+the no-op path (see the first Live-testing finding above). Two deliberate
+ways to break it, one per code path — both confirmed working end to end on
+2026-08-31, timings below are real, not estimates.
+
+**Path A drill — suspend data movement (safe, ~6 seconds observed):**
+```bash
+# on the current SECONDARY (check with ag-status first if unsure which one)
+/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P '<sa_password>' -Q "ALTER DATABASE AdventureWorks SET HADR SUSPEND"
+```
+Confirm via `ag-status`: the suspended replica should show
+`is_suspended = 1`, `NOT SYNCHRONIZING`. Then:
+```bash
+curl -X POST "http://localhost:8000/api/v1/deploy/sync-rebuild?target=<that vm>"
+```
+Expect: `suspended_check` reads `1`, "Resume data movement" runs
+(`changed: true`), final wait reaches `SYNCHRONIZED` on the first attempt.
+Confirmed exactly this on the first try — see the Live-testing finding
+above for the full task-by-task trace.
+
+**Path B drill — force a replica fully out of the AG (safe against a
+SECONDARY; confirmed ~27 seconds end to end, no manual recovery needed —
+**never do this against the current PRIMARY**):**
+```bash
+# on the current SECONDARY
+/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P '<sa_password>' -Q "ALTER AVAILABILITY GROUP [AG1] OFFLINE"
+/opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P '<sa_password>' -Q "DROP AVAILABILITY GROUP [AG1]"
+```
+Confirm `SELECT COUNT(*) FROM sys.availability_groups` reads `0` locally,
+then call `sync-rebuild` on that target right away:
+```bash
+curl -X POST "http://localhost:8000/api/v1/deploy/sync-rebuild?target=<that vm>"
+```
+Expect: `ag_membership_check` reads `0`, "Drop a stale standalone copy"
+runs (may harmlessly error with `Msg 5052` if the database is still mid
+`RESTORING` — that's fine, nothing needed dropping), `JOIN` succeeds
+outright with no 41106, `GRANT` succeeds, and the final wait reaches
+`SYNCHRONIZED` within a couple of poll attempts for a database this small.
+No `REMOVE REPLICA`/`ADD REPLICA` needed — that dance is specific to
+recovering from an actual split-brain (see the Live-testing finding above
+for why), not something this drill requires.
 
 ## What could still go wrong (learning notes)
 
