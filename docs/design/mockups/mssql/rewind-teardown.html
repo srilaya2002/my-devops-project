@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>MSSQL — Rewind / Teardown</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-mssql">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §5</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="index.html">&larr; MSSQL hub</a>
+  <div class="tabs">
+    <a class="tab" href="build-ag.html">Build AG</a>
+    <a class="tab active" href="rewind-teardown.html">Rewind / Teardown</a>
+    <a class="tab" href="dr-failover.html">DR Failover</a>
+    <a class="tab" href="dr-sync.html">DR Sync</a>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Rewind Plan <span class="method-chip method-get" style="margin-left:6px;">GET /api/v1/deploy/rewind-plan</span></p>
+    <p class="page-sub" style="margin:-6px 0 14px;">Fetched once on page load — describes each destructive playbook, doesn't execute anything.</p>
+
+    <details class="accordion-item" open>
+      <summary>Teardown <span class="badge badge-idle">leaves MSSQL installed</span></summary>
+      <div class="accordion-body">
+        <ol>
+          <li>Drop the Availability Group on both replicas (independently, CLUSTER_TYPE=NONE)</li>
+          <li>Take AdventureWorks out of HADR if still flagged</li>
+          <li>Drop the AdventureWorks database on both replicas</li>
+          <li>Drop the Always On endpoint and AG certificate on both replicas</li>
+          <li>Drop the database master key</li>
+          <li>Remove AG certificate files, striped backups, seed backups, downloaded .bak</li>
+          <li>Clear the controller-side backup/cert relay directories</li>
+        </ol>
+      </div>
+    </details>
+
+    <details class="accordion-item">
+      <summary>Rewind <span class="badge badge-idle">leaves MSSQL installed</span></summary>
+      <div class="accordion-body">
+        <ol>
+          <li>Everything in Teardown, then</li>
+          <li>Re-run site.yml against vm1 only: reconfirm config and restore a fresh AdventureWorks</li>
+          <li>Leaves vm1 with a clean AdventureWorks and no AG — ready to retry backup/restore/alwayson</li>
+        </ol>
+      </div>
+    </details>
+
+    <details class="accordion-item">
+      <summary>Reset Baseline <span class="badge badge-fail">removes MSSQL</span></summary>
+      <div class="accordion-body">
+        <ol>
+          <li>Stop mssql-server</li>
+          <li>Remove mssql-server and mssql-tools packages and their yum repos</li>
+          <li>Delete /var/opt/mssql, data_dir, log_dir, backup_dir</li>
+          <li>Clear controller-side relay directories</li>
+          <li>Host returns to a bare VM — call POST /install afterward to rebuild</li>
+        </ol>
+      </div>
+    </details>
+  </div>
+
+  <!-- Teardown -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Teardown</h4><p class="action-card-desc">Drop AG, AdventureWorks, and backup artifacts. Leaves MSSQL installed.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/teardown</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">teardown.yml</span>.</p>
+          <button class="btn btn-danger">Teardown ▷</button>
+        </div>
+        <p class="page-sub" style="margin:8px 0 0;">Destructive — requires typed confirmation ("TEARDOWN") before submit.</p>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>—</dd>
+          <dt>task_id</dt><dd>—</dd>
+        </dl>
+        <p class="page-sub" style="margin:4px 0 0;">Not run yet in this session.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rewind -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Rewind</h4><p class="action-card-desc">Teardown, then reinstall a clean AdventureWorks on VM1 only.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/rewind</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — chains <span class="chip">teardown.yml</span> · <span class="chip">site.yml</span> (limit vm1).</p>
+          <button class="btn btn-danger">Rewind ▷</button>
+        </div>
+        <p class="page-sub" style="margin:8px 0 0;">Destructive — requires typed confirmation ("REWIND") before submit.</p>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>—</dd>
+          <dt>task_id</dt><dd>—</dd>
+        </dl>
+        <p class="page-sub" style="margin:4px 0 0;">Not run yet in this session.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset Baseline -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Reset Baseline</h4><p class="action-card-desc">Full uninstall — returns both hosts to a bare VM. Does not reinstall.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/reset-baseline</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">uninstall.yml</span>.</p>
+          <button class="btn btn-danger">Reset Baseline ▷</button>
+        </div>
+        <p class="page-sub" style="margin:8px 0 0;">Most destructive action on this page — requires typed confirmation ("RESET") before submit.</p>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>—</dd>
+          <dt>task_id</dt><dd>—</dd>
+        </dl>
+        <p class="page-sub" style="margin:4px 0 0;">Not run yet in this session.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Task Progress</p>
+    <div class="progress-meta">
+      <span>task_id: <span class="mono">—</span> · playbook: <span class="mono">—</span></span>
+      <span class="badge badge-idle">IDLE</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Log Tail</p>
+    <div class="log-pane">
+      <div class="log-chrome"><span></span><span></span><span></span></div>
+      <div class="log-body"><span class="dim">no task run yet — GET /api/v1/deploy/history</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

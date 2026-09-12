@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>MSSQL — Build AG</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-mssql">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §5</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="index.html">&larr; MSSQL hub</a>
+  <div class="tabs">
+    <a class="tab active" href="build-ag.html">Build AG</a>
+    <a class="tab" href="rewind-teardown.html">Rewind / Teardown</a>
+    <a class="tab" href="dr-failover.html">DR Failover</a>
+    <a class="tab" href="dr-sync.html">DR Sync</a>
+  </div>
+
+  <!-- Install -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Install</h4><p class="action-card-desc">Deploy and install MSSQL Server on both replicas (30–60 min).</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/install</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">site.yml</span> against VM1 &amp; VM2.</p>
+          <button class="btn btn-primary">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">9a41c0e2…</dd>
+          <dt>playbook</dt><dd class="chip">site.yml</dd>
+          <dt>message</dt><dd>"MSSQL installation started"</dd>
+          <dt>duration</dt><dd>~45 min (estimated)</dd>
+          <dt>instructions</dt><dd>"Check /status or /history for progress"</dd>
+        </dl>
+        <details class="json-toggle">
+          <summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"9a41c0e2-..."</span>,
+  <span class="k">"message"</span>: <span class="s">"MSSQL installation started"</span>,
+  <span class="k">"engine"</span>: <span class="s">"ansible"</span>,
+  <span class="k">"playbook"</span>: <span class="s">"site.yml"</span>,
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">45</span>,
+  <span class="k">"instructions"</span>: <span class="s">"Check /api/v1/deploy/status or /api/v1/deploy/history for progress"</span>
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Build -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Build</h4><p class="action-card-desc">Idempotent prepare + install via the mssql_build role. Safe to re-run.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/build</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">build.yml</span>.</p>
+          <button class="btn btn-primary">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">2f7bd814…</dd>
+          <dt>playbook</dt><dd class="chip">build.yml</dd>
+          <dt>message</dt><dd>"MSSQL build started (prepare + install)"</dd>
+          <dt>duration</dt><dd>~10 min (estimated)</dd>
+          <dt>notes</dt><dd>"Runs the mssql_build role's full install flow; idempotent"</dd>
+        </dl>
+        <details class="json-toggle">
+          <summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"2f7bd814-..."</span>,
+  <span class="k">"message"</span>: <span class="s">"MSSQL build started (prepare + install)"</span>,
+  <span class="k">"engine"</span>: <span class="s">"ansible"</span>,
+  <span class="k">"playbook"</span>: <span class="s">"build.yml"</span>,
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">10</span>,
+  <span class="k">"notes"</span>: <span class="s">"Runs the mssql_build role's full install flow; safe to re-run (idempotent)."</span>
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Install Tools -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Install Tools</h4><p class="action-card-desc">Install sqlcmd / mssql-tools only, no database work.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/install-tools</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">site.yml</span> tags <span class="chip">install,tools</span>.</p>
+          <button class="btn btn-primary">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">e13aa207…</dd>
+          <dt>components</dt><dd>mssql-tools, sqlcmd</dd>
+          <dt>duration</dt><dd>~10 min (estimated)</dd>
+        </dl>
+        <details class="json-toggle"><summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"e13aa207-..."</span>,
+  <span class="k">"message"</span>: <span class="s">"MSSQL tools installation started"</span>,
+  <span class="k">"playbook"</span>: <span class="s">"site.yml"</span>,
+  <span class="k">"tags"</span>: [<span class="s">"install"</span>, <span class="s">"tools"</span>],
+  <span class="k">"components"</span>: [<span class="s">"mssql-tools"</span>, <span class="s">"sqlcmd"</span>],
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">10</span>
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Restore DB -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Restore DB</h4><p class="action-card-desc">Restore AdventureWorks to VM1 only.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/restore-db</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">site.yml</span> tag <span class="chip">adventureworks</span> on VM1.</p>
+          <button class="btn btn-primary">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">7c05e912…</dd>
+          <dt>database</dt><dd>AdventureWorks</dd>
+          <dt>operations</dt>
+          <dd>
+            <ul class="checklist">
+              <li>Download AdventureWorks2019.bak on VM1</li>
+              <li>Restore AdventureWorks on VM1</li>
+            </ul>
+          </dd>
+        </dl>
+        <details class="json-toggle"><summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"7c05e912-..."</span>,
+  <span class="k">"message"</span>: <span class="s">"Database restore started on VM1"</span>,
+  <span class="k">"playbook"</span>: <span class="s">"site.yml"</span>,
+  <span class="k">"tags"</span>: [<span class="s">"adventureworks"</span>],
+  <span class="k">"database"</span>: <span class="s">"AdventureWorks"</span>,
+  <span class="k">"operations"</span>: [
+    <span class="s">"Download AdventureWorks2019.bak on VM1"</span>,
+    <span class="s">"Restore AdventureWorks on VM1"</span>
+  ],
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">10</span>
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backup -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Backup</h4><p class="action-card-desc">10-stripe backup on VM1, transferred and restored on VM2.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/backup</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">backup.yml</span>.</p>
+          <button class="btn btn-primary">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">b220f5a1…</dd>
+          <dt>operations</dt>
+          <dd>
+            <ul class="checklist">
+              <li>Create 10-stripe backup on VM1</li>
+              <li>Transfer backup files to VM2</li>
+              <li>Restore AdventureWorks on VM2</li>
+            </ul>
+          </dd>
+        </dl>
+        <details class="json-toggle"><summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"b220f5a1-..."</span>,
+  <span class="k">"playbook"</span>: <span class="s">"backup.yml"</span>,
+  <span class="k">"operations"</span>: [
+    <span class="s">"Create 10-stripe backup on VM1"</span>,
+    <span class="s">"Transfer backup files to VM2"</span>,
+    <span class="s">"Restore AdventureWorks on VM2"</span>
+  ],
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">15</span>
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Always On -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Form Always On AG</h4><p class="action-card-desc">Configure the Always On Availability Group across VM1 and VM2.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/alwayson</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">alwayson.yml</span>.</p>
+          <button class="btn btn-primary">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">8f2c1a4d…</dd>
+          <dt>operations</dt>
+          <dd>
+            <ul class="checklist">
+              <li>Verify MSSQL connectivity</li>
+              <li>Create AG endpoints</li>
+              <li>Create and join availability group</li>
+              <li>Verify AG health</li>
+            </ul>
+          </dd>
+        </dl>
+        <details class="json-toggle" open><summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"8f2c1a4d-..."</span>,
+  <span class="k">"message"</span>: <span class="s">"Always On availability group deployment started"</span>,
+  <span class="k">"playbook"</span>: <span class="s">"alwayson.yml"</span>,
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">30</span>,
+  <span class="k">"operations"</span>: [
+    <span class="s">"Verify MSSQL connectivity"</span>,
+    <span class="s">"Create AG endpoints"</span>,
+    <span class="s">"Create and join availability group"</span>,
+    <span class="s">"Verify AG health"</span>
+  ]
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full AG sequence -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Run Full AG Sequence</h4><p class="action-card-desc">Chains restore → striped backup/restore → Always On as one sequence.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/full-ag</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — chains <span class="chip">site.yml</span> · <span class="chip">backup.yml</span> · <span class="chip">alwayson.yml</span>.</p>
+          <button class="btn btn-primary">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">4d9e2b77…</dd>
+          <dt>duration</dt><dd>~90 min (estimated)</dd>
+        </dl>
+        <details class="json-toggle"><summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"4d9e2b77-..."</span>,
+  <span class="k">"playbooks"</span>: [<span class="s">"site.yml"</span>, <span class="s">"backup.yml"</span>, <span class="s">"alwayson.yml"</span>],
+  <span class="k">"operations"</span>: [
+    <span class="s">"Restore AdventureWorks on VM1"</span>,
+    <span class="s">"Create 10-stripe backup on VM1"</span>,
+    <span class="s">"Transfer backup to VM2 and restore"</span>,
+    <span class="s">"Configure Always On availability group"</span>
+  ],
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">90</span>
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- AG Status -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Check AG Status</h4><p class="action-card-desc">Read-only snapshot of replica roles and sync state.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/ag-status</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">ag_status.yml</span>. Safe any time.</p>
+          <button class="btn">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">1b6c9f30…</dd>
+          <dt>duration</dt><dd>~1 min (estimated)</dd>
+        </dl>
+        <p class="page-sub" style="margin:6px 0 0;">Actual replica role/sync output appears in Log Tail below once the task completes.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Task Progress</p>
+    <div class="progress-meta">
+      <span>task_id: <span class="mono">8f2c1a4d…</span> · playbook: <span class="mono">alwayson.yml</span></span>
+      <span class="badge badge-run">RUNNING 62%</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:62%"></div></div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Log Tail</p>
+    <div class="log-pane">
+      <div class="log-chrome"><span></span><span></span><span></span></div>
+      <div class="log-body">
+TASK [mssql : create availability group] ****<br>
+changed: [vm1]<br>
+<span class="dim">GET /api/v1/deploy/history … auto-scrolls</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

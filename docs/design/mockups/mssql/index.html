@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>MSSQL — Hub</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-mssql">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §4</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="../index.html">&larr; Back</a>
+  <h1 class="page-title">MSSQL — Always On Availability Group</h1>
+  <p class="page-sub">Screen 2 of 16 — RDBMS hub (template for Oracle / MySQL too).</p>
+
+  <div class="status-bar">
+    <span><strong>VM1</strong> <span class="badge badge-live">up</span></span>
+    <span><strong>VM2</strong> <span class="badge badge-live">up</span></span>
+    <span>Last action: <span class="badge badge-live">full-ag SUCCESS</span> 09:14</span>
+  </div>
+
+  <div class="card-grid">
+    <div class="card">
+      <h3>1. Build AG</h3>
+      <p class="card-endpoints">install · build · restore-db · backup · alwayson · full-ag · ag-status</p>
+      <div class="spacer"></div>
+      <a class="btn btn-primary" href="build-ag.html">Open &gt;</a>
+    </div>
+    <div class="card">
+      <h3>2. Rewind / Teardown</h3>
+      <p class="card-endpoints">rewind-plan · teardown · rewind · reset-baseline</p>
+      <div class="spacer"></div>
+      <a class="btn btn-primary" href="rewind-teardown.html">Open &gt;</a>
+    </div>
+    <div class="card">
+      <h3>3. DR Failover</h3>
+      <p class="card-endpoints">ag-status · failover (target, mode)</p>
+      <div class="spacer"></div>
+      <a class="btn btn-primary" href="dr-failover.html">Open &gt;</a>
+    </div>
+    <div class="card">
+      <h3>4. DR Sync</h3>
+      <p class="card-endpoints">ag-status · sync-rebuild (target)</p>
+      <div class="spacer"></div>
+      <a class="btn btn-primary" href="dr-sync.html">Open &gt;</a>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:24px;">
+    <p class="panel-title">Hosts <span class="method-chip method-get" style="margin-left:6px;">GET /api/v1/deploy/hosts</span></p>
+    <div class="host-grid">
+      <div class="host-card">
+        <div class="host-name">vm1 <span class="badge badge-live">up</span></div>
+        <dl>
+          <dt>host</dt><dd>devops_VM1</dd>
+          <dt>user</dt><dd>devops</dd>
+          <dt>port</dt><dd>22</dd>
+          <dt>dns</dt><dd>192.168.70.129 (resolved)</dd>
+          <dt>ping</dt><dd>reachable</dd>
+        </dl>
+      </div>
+      <div class="host-card">
+        <div class="host-name">vm2 <span class="badge badge-live">up</span></div>
+        <dl>
+          <dt>host</dt><dd>devops_VM2</dd>
+          <dt>user</dt><dd>devops</dd>
+          <dt>port</dt><dd>22</dd>
+          <dt>dns</dt><dd>192.168.70.130 (resolved)</dd>
+          <dt>ping</dt><dd>reachable</dd>
+        </dl>
+      </div>
+    </div>
+    <div style="margin-top:14px; display:flex; justify-content:flex-end;">
+      <button class="btn">Ping Hosts ▷ <span class="chip" style="margin-left:6px;">POST /ping</span></button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Recent Executions <span class="method-chip method-get" style="margin-left:6px;">GET /api/v1/deploy/history</span></p>
+    <table class="data-table">
+      <thead>
+        <tr><th>task_id</th><th>operation</th><th>status</th><th>started</th><th>duration</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">8f2c1a4d…</td><td>alwayson</td><td><span class="badge badge-live">success</span></td><td class="mono">09:14:02</td><td>41.2s</td></tr>
+        <tr><td class="mono">b220f5a1…</td><td>backup-restore</td><td><span class="badge badge-live">success</span></td><td class="mono">09:07:55</td><td>5m 12s</td></tr>
+        <tr><td class="mono">7c05e912…</td><td>restore-adventureworks</td><td><span class="badge badge-live">success</span></td><td class="mono">09:02:11</td><td>1m 48s</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>MySQL — Build AG</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-mysql">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §5</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="index.html">&larr; MySQL hub</a>
+  <div class="tabs">
+    <a class="tab active" href="build-ag.html">Build AG</a>
+    <a class="tab" href="rewind-teardown.html">Rewind / Teardown</a>
+    <a class="tab" href="dr-failover.html">DR Failover</a>
+    <a class="tab" href="dr-sync.html">DR Sync</a>
+  </div>
+
+  <div class="banner-soon">Backend not yet implemented — see <a href="../../../guides/mysql-fastapi-build-from-scratch.md">docs/guides/mysql-fastapi-build-from-scratch.md</a>.</div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Install</h4><p class="action-card-desc">Install MySQL 8.4 server on vm5 + vm6.</p></div>
+      <span class="method-chip method-post">POST /install</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Configure</h4><p class="action-card-desc">Apply GTID replication + server-id configuration on both hosts.</p></div>
+      <span class="method-chip method-post">POST /configure</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Create Replication User (vm5)</h4><p class="action-card-desc">Create the GTID replication account on the primary.</p></div>
+      <span class="method-chip method-post">POST /replication-user</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Backup (vm5)</h4><p class="action-card-desc">XtraBackup full backup on the primary.</p></div>
+      <span class="method-chip method-post">POST /backup</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Restore (vm6)</h4><p class="action-card-desc">Transfer and prepare the backup on the replica.</p></div>
+      <span class="method-chip method-post">POST /restore</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Start Replication (vm6)</h4><p class="action-card-desc">Point the replica at the primary and start GTID replication.</p></div>
+      <span class="method-chip method-post">POST /replication</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Task Progress</p>
+    <div class="progress-meta"><span>task_id: <span class="mono">—</span></span><span class="badge badge-soon">COMING SOON</span></div>
+    <div class="progress-track"><div class="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Log Tail</p>
+    <div class="log-pane">
+      <div class="log-chrome"><span></span><span></span><span></span></div>
+      <div class="log-body"><span class="dim">backend not implemented</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

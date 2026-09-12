@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Oracle — Hub</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-oracle">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §4</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="../index.html">&larr; Back</a>
+  <h1 class="page-title">Oracle 19c — Data Guard</h1>
+  <p class="page-sub">Screen 7 of 16 — RDBMS hub. Same template as MSSQL.</p>
+
+  <div class="banner-soon">Backend not yet implemented — see <a href="../../../guides/oracle-19c-dataguard-design.md">docs/guides/oracle-19c-dataguard-design.md</a>.</div>
+
+  <div class="status-bar">
+    <span><strong>VM3</strong> (primary) <span class="badge badge-soon">n/a</span></span>
+    <span><strong>VM4</strong> (standby) <span class="badge badge-soon">n/a</span></span>
+    <span>Last action: —</span>
+  </div>
+
+  <div class="card-grid">
+    <div class="card disabled">
+      <h3>1. Build AG</h3>
+      <p class="card-endpoints">install · primary-db (vm3) · standby-prep (vm4) · duplicate-standby · dataguard-broker</p>
+      <div class="spacer"></div>
+      <a class="btn" href="build-ag.html">Open &gt;</a>
+    </div>
+    <div class="card disabled">
+      <h3>2. Rewind / Teardown</h3>
+      <p class="card-endpoints">rewind-plan · teardown · rewind · reset-baseline</p>
+      <div class="spacer"></div>
+      <a class="btn" href="rewind-teardown.html">Open &gt;</a>
+    </div>
+    <div class="card disabled">
+      <h3>3. DR Failover</h3>
+      <p class="card-endpoints">switchover · failover (target, mode)</p>
+      <div class="spacer"></div>
+      <a class="btn" href="dr-failover.html">Open &gt;</a>
+    </div>
+    <div class="card disabled">
+      <h3>4. DR Sync</h3>
+      <p class="card-endpoints">sync-rebuild (reinstate standby)</p>
+      <div class="spacer"></div>
+      <a class="btn" href="dr-sync.html">Open &gt;</a>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:24px;">
+    <p class="panel-title">Hosts <span class="method-chip method-get" style="margin-left:6px;">GET /hosts</span></p>
+    <div class="host-grid">
+      <div class="host-card" style="opacity:.6;">
+        <div class="host-name">vm3 <span class="badge badge-soon">n/a</span></div>
+        <dl><dt>host</dt><dd>devops_VM3</dd><dt>role</dt><dd>primary</dd></dl>
+      </div>
+      <div class="host-card" style="opacity:.6;">
+        <div class="host-name">vm4 <span class="badge badge-soon">n/a</span></div>
+        <dl><dt>host</dt><dd>devops_VM4</dd><dt>role</dt><dd>standby</dd></dl>
+      </div>
+    </div>
+    <div style="margin-top:14px; display:flex; justify-content:flex-end;">
+      <button class="btn" disabled>Ping Hosts ▷</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Recent Executions <span class="method-chip method-get" style="margin-left:6px;">GET /history</span></p>
+    <p class="page-sub" style="margin:0;">No executions — backend not implemented.</p>
+  </div>
+</div>
+</body>
+</html>

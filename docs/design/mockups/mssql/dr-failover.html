@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>MSSQL — DR Failover</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-mssql">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §5</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="index.html">&larr; MSSQL hub</a>
+  <div class="tabs">
+    <a class="tab" href="build-ag.html">Build AG</a>
+    <a class="tab" href="rewind-teardown.html">Rewind / Teardown</a>
+    <a class="tab active" href="dr-failover.html">DR Failover</a>
+    <a class="tab" href="dr-sync.html">DR Sync</a>
+  </div>
+
+  <!-- AG Status -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Check AG Status</h4><p class="action-card-desc">Confirm current primary/secondary + sync state before failing over.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/ag-status</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">ag_status.yml</span>.</p>
+          <button class="btn">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">1b6c9f30…</dd>
+        </dl>
+        <p class="page-sub" style="margin:6px 0 0;">Replica role/sync detail streams to Log Tail below once the task completes.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Failover -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Fail Over</h4><p class="action-card-desc">planned requires target already SYNCHRONIZED (no data loss). forced uses FORCE_FAILOVER_ALLOW_DATA_LOSS — only when the current primary is unreachable.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/failover</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <div class="field-group">
+            <div class="field"><label>target</label>
+              <select><option>vm1</option><option selected>vm2</option></select>
+            </div>
+            <div class="field"><label>mode</label>
+              <select><option selected>planned</option><option>forced</option></select>
+            </div>
+          </div>
+          <button class="btn btn-danger">Fail Over ▷</button>
+        </div>
+        <p class="page-sub" style="margin:8px 0 0;">mode=forced requires typed confirmation ("FORCE") before submit — possible data loss.</p>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">c91e0734…</dd>
+          <dt>target</dt><dd>vm2</dd>
+          <dt>mode</dt><dd>planned</dd>
+          <dt>message</dt><dd>"Failover to vm2 (planned) started"</dd>
+        </dl>
+        <details class="json-toggle" open><summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"c91e0734-..."</span>,
+  <span class="k">"message"</span>: <span class="s">"Failover to vm2 (planned) started"</span>,
+  <span class="k">"engine"</span>: <span class="s">"ansible"</span>,
+  <span class="k">"playbook"</span>: <span class="s">"failover.yml"</span>,
+  <span class="k">"target"</span>: <span class="s">"vm2"</span>,
+  <span class="k">"mode"</span>: <span class="s">"planned"</span>,
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">3</span>
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Task Progress</p>
+    <div class="progress-meta">
+      <span>task_id: <span class="mono">c91e0734…</span> · playbook: <span class="mono">failover.yml</span></span>
+      <span class="badge badge-run">RUNNING 35%</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:35%"></div></div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Log Tail</p>
+    <div class="log-pane">
+      <div class="log-chrome"><span></span><span></span><span></span></div>
+      <div class="log-body">
+TASK [mssql : failover availability group] ****<br>
+changed: [vm2]<br>
+<span class="dim">GET /api/v1/deploy/history … auto-scrolls</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

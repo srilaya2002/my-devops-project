@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>MSSQL — DR Sync</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-mssql">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §5</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="index.html">&larr; MSSQL hub</a>
+  <div class="tabs">
+    <a class="tab" href="build-ag.html">Build AG</a>
+    <a class="tab" href="rewind-teardown.html">Rewind / Teardown</a>
+    <a class="tab" href="dr-failover.html">DR Failover</a>
+    <a class="tab active" href="dr-sync.html">DR Sync</a>
+  </div>
+
+  <!-- AG Status -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Check AG Status</h4><p class="action-card-desc">Confirm which replica is lagging/suspended before resyncing.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/ag-status</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <p class="no-params">No parameters required — runs <span class="chip">ag_status.yml</span>.</p>
+          <button class="btn">Run ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">1b6c9f30…</dd>
+        </dl>
+        <p class="page-sub" style="margin:6px 0 0;">Replica role/sync detail streams to Log Tail below once the task completes.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sync/Rebuild -->
+  <div class="action-card">
+    <div class="action-card-head">
+      <div><h4>Sync / Rebuild</h4><p class="action-card-desc">Resumes suspended data movement, or rejoins + reseeds target if it fell out of the AG.</p></div>
+      <span class="method-chip method-post">POST /api/v1/deploy/sync-rebuild</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <div class="field-group">
+            <div class="field"><label>target</label>
+              <select><option>vm1</option><option selected>vm2</option></select>
+            </div>
+          </div>
+          <button class="btn btn-primary">Sync / Rebuild ▷</button>
+        </div>
+      </div>
+      <div class="response-block">
+        <p class="block-label">Response</p>
+        <dl class="response-grid">
+          <dt>status</dt><dd>initiated</dd>
+          <dt>task_id</dt><dd class="chip">5a8d2c19…</dd>
+          <dt>target</dt><dd>vm2</dd>
+          <dt>message</dt><dd>"Sync rebuild for vm2 started"</dd>
+          <dt>duration</dt><dd>~15 min (estimated)</dd>
+        </dl>
+        <details class="json-toggle" open><summary>View raw JSON</summary>
+          <pre>{
+  <span class="k">"status"</span>: <span class="s">"initiated"</span>,
+  <span class="k">"task_id"</span>: <span class="s">"5a8d2c19-..."</span>,
+  <span class="k">"message"</span>: <span class="s">"Sync rebuild for vm2 started"</span>,
+  <span class="k">"engine"</span>: <span class="s">"ansible"</span>,
+  <span class="k">"playbook"</span>: <span class="s">"sync_rebuild.yml"</span>,
+  <span class="k">"target"</span>: <span class="s">"vm2"</span>,
+  <span class="k">"estimated_duration_minutes"</span>: <span class="n">15</span>
+}</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Task Progress</p>
+    <div class="progress-meta">
+      <span>task_id: <span class="mono">5a8d2c19…</span> · playbook: <span class="mono">sync_rebuild.yml</span></span>
+      <span class="badge badge-run">RUNNING 18%</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:18%"></div></div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Log Tail</p>
+    <div class="log-pane">
+      <div class="log-chrome"><span></span><span></span><span></span></div>
+      <div class="log-body">
+TASK [mssql : resume data movement] ****<br>
+changed: [vm2]<br>
+<span class="dim">GET /api/v1/deploy/history … auto-scrolls</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

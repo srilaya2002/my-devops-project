@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>MySQL — DR Failover</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-mysql">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §5</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="index.html">&larr; MySQL hub</a>
+  <div class="tabs">
+    <a class="tab" href="build-ag.html">Build AG</a>
+    <a class="tab" href="rewind-teardown.html">Rewind / Teardown</a>
+    <a class="tab active" href="dr-failover.html">DR Failover</a>
+    <a class="tab" href="dr-sync.html">DR Sync</a>
+  </div>
+
+  <div class="banner-soon">Backend not yet implemented — see <a href="../../../guides/mysql-replication-failover-implementation.md">docs/guides/mysql-replication-failover-implementation.md</a>.</div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Switchover / Failover</h4><p class="action-card-desc">planned = graceful promotion, replica caught up first. forced = promote immediately, used when primary is unreachable.</p></div>
+      <span class="method-chip method-post">POST /switchover · /failover</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block">
+        <p class="block-label">Request</p>
+        <div class="request-form-row">
+          <div class="field-group">
+            <div class="field"><label>target</label><select disabled><option>vm5</option><option selected>vm6</option></select></div>
+            <div class="field"><label>mode</label><select disabled><option selected>planned</option><option>forced</option></select></div>
+          </div>
+          <button class="btn btn-danger" disabled>Fail Over ▷</button>
+        </div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Task Progress</p>
+    <div class="progress-meta"><span>task_id: <span class="mono">—</span></span><span class="badge badge-soon">COMING SOON</span></div>
+    <div class="progress-track"><div class="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Log Tail</p>
+    <div class="log-pane">
+      <div class="log-chrome"><span></span><span></span><span></span></div>
+      <div class="log-body"><span class="dim">backend not implemented</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

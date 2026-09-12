@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Oracle — Rewind / Teardown</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-oracle">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §5</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="index.html">&larr; Oracle hub</a>
+  <div class="tabs">
+    <a class="tab" href="build-ag.html">Build AG</a>
+    <a class="tab active" href="rewind-teardown.html">Rewind / Teardown</a>
+    <a class="tab" href="dr-failover.html">DR Failover</a>
+    <a class="tab" href="dr-sync.html">DR Sync</a>
+  </div>
+
+  <div class="banner-soon">Backend not yet implemented — see <a href="../../../guides/oracle-rewind-and-teardown-implementation.md">docs/guides/oracle-rewind-and-teardown-implementation.md</a>.</div>
+
+  <div class="panel">
+    <p class="panel-title">Rewind Plan <span class="method-chip method-get" style="margin-left:6px;">GET /rewind-plan</span></p>
+    <details class="accordion-item">
+      <summary>Teardown <span class="badge badge-idle">leaves Oracle installed</span></summary>
+      <div class="accordion-body"><ol><li>Disable Data Guard broker configuration</li><li>Drop standby database on VM4</li><li>Remove standby control files &amp; redo transport config</li></ol></div>
+    </details>
+    <details class="accordion-item">
+      <summary>Rewind <span class="badge badge-idle">leaves Oracle installed</span></summary>
+      <div class="accordion-body"><ol><li>Everything in Teardown, then</li><li>Rebuild a fresh primary on VM3</li></ol></div>
+    </details>
+    <details class="accordion-item">
+      <summary>Reset Baseline <span class="badge badge-fail">removes Oracle</span></summary>
+      <div class="accordion-body"><ol><li>Stop listener &amp; instances</li><li>Deinstall Oracle software on VM3 + VM4</li><li>Delete ORACLE_HOME, database files</li></ol></div>
+    </details>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Teardown</h4><p class="action-card-desc">Remove Data Guard config and standby, keep Oracle installed.</p></div>
+      <span class="method-chip method-post">POST /teardown</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn btn-danger" disabled>Teardown ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Rewind</h4><p class="action-card-desc">Teardown, then rebuild a fresh primary on VM3.</p></div>
+      <span class="method-chip method-post">POST /rewind</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn btn-danger" disabled>Rewind ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Reset Baseline</h4><p class="action-card-desc">Deinstall Oracle entirely on both hosts.</p></div>
+      <span class="method-chip method-post">POST /reset-baseline</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required — runs <span class="chip">uninstall.yml</span>.</p><button class="btn btn-danger" disabled>Reset Baseline ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Task Progress</p>
+    <div class="progress-meta"><span>task_id: <span class="mono">—</span></span><span class="badge badge-soon">COMING SOON</span></div>
+    <div class="progress-track"><div class="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Log Tail</p>
+    <div class="log-pane">
+      <div class="log-chrome"><span></span><span></span><span></span></div>
+      <div class="log-body"><span class="dim">backend not implemented</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

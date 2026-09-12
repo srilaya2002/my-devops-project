@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Oracle — Build AG</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body class="theme-oracle">
+<div class="topbar">
+  <div class="brand"><a href="../index.html">DevOps Console</a></div>
+  <div class="doc-ref">Design spec: <a href="../../frontend-ui-design.md">frontend-ui-design.md §5</a></div>
+</div>
+<div class="container">
+  <a class="back-link" href="index.html">&larr; Oracle hub</a>
+  <div class="tabs">
+    <a class="tab active" href="build-ag.html">Build AG</a>
+    <a class="tab" href="rewind-teardown.html">Rewind / Teardown</a>
+    <a class="tab" href="dr-failover.html">DR Failover</a>
+    <a class="tab" href="dr-sync.html">DR Sync</a>
+  </div>
+
+  <div class="banner-soon">Backend not yet implemented — see <a href="../../../guides/oracle-fastapi-build-from-scratch.md">docs/guides/oracle-fastapi-build-from-scratch.md</a>.</div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Install</h4><p class="action-card-desc">Prep hosts, stage &amp; install Oracle 19c software on VM3 + VM4.</p></div>
+      <span class="method-chip method-post">POST /install</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required — runs <span class="chip">install.yml</span>.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Configure Listener</h4><p class="action-card-desc">Configure the TNS listener on both hosts.</p></div>
+      <span class="method-chip method-post">POST /listener</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Primary DB (vm3)</h4><p class="action-card-desc">Create the primary database on VM3.</p></div>
+      <span class="method-chip method-post">POST /primary-db</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Standby Prep (vm4)</h4><p class="action-card-desc">Prepare the standby instance on VM4.</p></div>
+      <span class="method-chip method-post">POST /standby-prep</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Duplicate Standby</h4><p class="action-card-desc">RMAN duplicate from primary to build the standby database.</p></div>
+      <span class="method-chip method-post">POST /duplicate-standby</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="action-card disabled">
+    <div class="action-card-head">
+      <div><h4>Form Data Guard Broker</h4><p class="action-card-desc">Enable the broker configuration and register both instances.</p></div>
+      <span class="method-chip method-post">POST /dataguard-broker</span>
+    </div>
+    <div class="action-card-body">
+      <div class="request-block"><p class="block-label">Request</p>
+        <div class="request-form-row"><p class="no-params">No parameters required.</p><button class="btn" disabled>Run ▷</button></div>
+      </div>
+      <div class="response-block"><p class="block-label">Response</p><p class="page-sub" style="margin:0;">Not available — backend not implemented.</p></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Task Progress</p>
+    <div class="progress-meta"><span>task_id: <span class="mono">—</span></span><span class="badge badge-soon">COMING SOON</span></div>
+    <div class="progress-track"><div class="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="panel">
+    <p class="panel-title">Log Tail</p>
+    <div class="log-pane">
+      <div class="log-chrome"><span></span><span></span><span></span></div>
+      <div class="log-body"><span class="dim">backend not implemented</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

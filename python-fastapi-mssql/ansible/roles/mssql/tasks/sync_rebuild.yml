@@ -58,7 +58,7 @@
 
 - name: Check whether AdventureWorks data movement is suspended on this replica
   shell: |
-    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ISNULL(drs.is_suspended, 0) FROM sys.databases d LEFT JOIN sys.dm_hadr_database_replica_states drs ON drs.database_id = d.database_id WHERE d.name = 'AdventureWorks'"
+    {{ mssql_tools_path }}/sqlcmd -S localhost -U SA -P "{{ sa_password }}" -h -1 -W -Q "SET NOCOUNT ON; SELECT ISNULL(drs.is_suspended, 0) FROM sys.databases d LEFT JOIN sys.dm_hadr_database_replica_states drs ON drs.database_id = d.database_id LEFT JOIN sys.availability_replicas ar ON ar.replica_id = drs.replica_id WHERE d.name = 'AdventureWorks' AND (ar.replica_server_name = '{{ vmware_name }}' OR ar.replica_server_name IS NULL)"
   register: suspended_check
   changed_when: false
   when: (ag_membership_check.stdout | trim) == '1'
