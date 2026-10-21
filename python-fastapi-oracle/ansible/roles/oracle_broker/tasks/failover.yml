@@ -1,0 +1,53 @@
+---
+# Triggers a real Data Guard Broker failover, promoting this host to
+# primary. Invoked with --limit against the single surviving standby --
+# the one that should take over because the real primary is actually down.
+# Mirrors the SQL Server project's failover.yml in spirit (a deliberate,
+# explicit action, never run automatically as part of site.yml), though
+# Oracle's FAILOVER command has no separate planned/forced distinction the
+# way ALTER AVAILABILITY GROUP ... FAILOVER does -- broker already refuses
+# (or warns on) a failover that would lose data it can't account for.
+#
+# After this runs, the old primary is left disabled in the broker config,
+# needing a full rebuild (not a quick reinstate -- Flashback Database
+# isn't enabled in this build). See rebuild.yml for that half.
+
+- name: Determine this host's own identity
+  set_fact:
+    my_db_unique_name: "{{ (inventory_hostname == primary_host) | ternary(primary_db_unique_name, standby_db_unique_name) }}"
+    my_sid: "{{ (inventory_hostname == primary_host) | ternary(primary_sid, standby_sid) }}"
+
+- name: Check this host's current role (idempotent -- skip if already primary)
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT database_role FROM v\$database;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ my_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: failover_role_check
+  changed_when: false
+
+- name: Trigger failover, promoting this host to primary
+  shell: |
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ my_db_unique_name }} "failover to '{{ my_db_unique_name }}'"
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ my_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: failover_result
+  when: "'PRIMARY' not in failover_role_check.stdout"
+
+- name: Fail clearly if failover did not report success
+  fail:
+    msg: "Failover did not report success -- check failover_result.stdout before assuming this host is now primary."
+  when:
+    - failover_result is defined
+    - "'Failover succeeded' not in failover_result.stdout"
