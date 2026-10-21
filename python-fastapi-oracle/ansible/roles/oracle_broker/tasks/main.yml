@@ -1,0 +1,13 @@
+---
+# Runs against the combined oracle_servers group. Must run after
+# oracle_standby (needs spfile_conversion.yml already done -- broker
+# requires an spfile to persist role-transition parameter changes).
+
+- name: Standby redo logs on both databases
+  include_tasks: standby_redo_logs.yml
+
+- name: Enable Data Guard Broker on both databases
+  include_tasks: broker_enable.yml
+
+- name: Create broker configuration and register the standby
+  include_tasks: broker_config.yml

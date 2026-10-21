@@ -1,0 +1,7 @@
+---
+- name: Configure Data Guard Broker (standby redo logs, broker config, standby registration)
+  hosts: oracle_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: oracle_broker

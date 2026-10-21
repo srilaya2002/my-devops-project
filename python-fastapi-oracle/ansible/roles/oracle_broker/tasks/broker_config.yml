@@ -1,0 +1,107 @@
+---
+# Create (or confirm) the broker configuration and register the standby.
+# All dgmgrl commands run from primary; broker reaches the standby over
+# the network via its own connect identifier (already in tnsnames.ora from
+# oracle_standby's listener_tnsnames.yml).
+#
+# Idempotency here is text-matched against dgmgrl's own output rather than
+# a SQL query (there's no v$ view for "does a broker configuration exist"),
+# so it's less precise than the SQL-based checks elsewhere in this project.
+# Review this against the real dgmgrl output before trusting it blindly on
+# a from-scratch rebuild.
+
+- name: Check current broker configuration
+  shell: |
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ primary_db_unique_name }} "show configuration"
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: broker_config_check
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname == primary_host
+
+# Broker refuses to ADD DATABASE if the member being added already has a
+# manually-set LOG_ARCHIVE_DEST_n with a SERVICE attribute -- failed with
+# ORA-16698 during the manual walkthrough. The standby's init file sets
+# log_archive_dest_2 (for when it becomes primary after a role change);
+# clear it here so broker can take over, before the standby is registered.
+- name: Clear standby's own LOG_ARCHIVE_DEST_2 so broker can manage transport
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER SYSTEM SET LOG_ARCHIVE_DEST_2='' SCOPE=BOTH;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when:
+    - inventory_hostname == standby_host
+    - standby_db_unique_name not in (hostvars[primary_host].broker_config_check.stdout | default(''))
+
+- name: Create the broker configuration
+  shell: |
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ primary_db_unique_name }} "create configuration '{{ broker_config_name }}' as primary database is '{{ primary_db_unique_name }}' connect identifier is {{ primary_db_unique_name }}"
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: create_config_result
+  failed_when:
+    - create_config_result.rc != 0
+    - "'ORA-16504' not in create_config_result.stdout"
+  when:
+    - inventory_hostname == primary_host
+    - "'does not exist' in broker_config_check.stdout or broker_config_check.rc != 0"
+
+- name: Add the standby database to the configuration
+  shell: |
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ primary_db_unique_name }} "add database '{{ standby_db_unique_name }}' as connect identifier is {{ standby_db_unique_name }}"
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: add_db_result
+  failed_when:
+    - add_db_result.rc != 0
+    - "'already exists' not in add_db_result.stdout"
+  when:
+    - inventory_hostname == primary_host
+    - standby_db_unique_name not in broker_config_check.stdout
+
+- name: Enable the broker configuration
+  shell: |
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ primary_db_unique_name }} "enable configuration"
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: inventory_hostname == primary_host
+
+# Idempotent at the broker level -- setting APPLY-ON when it's already ON
+# is a harmless no-op ("Succeeded."). Needed because managed recovery
+# doesn't survive an instance restart on its own, and once broker owns this
+# database, restarting it through SQL directly (as managed_recovery.yml
+# does) can leave broker's own state tracking out of sync.
+- name: Ensure apply is running on the standby, via the broker
+  shell: |
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ primary_db_unique_name }} "edit database '{{ standby_db_unique_name }}' set state='APPLY-ON'"
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: inventory_hostname == primary_host

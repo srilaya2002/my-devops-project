@@ -1,0 +1,35 @@
+---
+# Enable Data Guard Broker on both databases. SCOPE=BOTH persists on both
+# sides now, since both run on an spfile -- primary always did, and the
+# standby was converted in oracle_standby's spfile_conversion.yml, which
+# must run before this role.
+
+- name: Check DG_BROKER_START
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT value FROM v\$parameter WHERE name = 'dg_broker_start';
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ (inventory_hostname == primary_host) | ternary(primary_sid, standby_sid) }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: broker_start_check
+  changed_when: false
+
+- name: Enable DG_BROKER_START
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER SYSTEM SET DG_BROKER_START=TRUE SCOPE=BOTH;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ (inventory_hostname == primary_host) | ternary(primary_sid, standby_sid) }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: "'TRUE' not in broker_start_check.stdout | upper"

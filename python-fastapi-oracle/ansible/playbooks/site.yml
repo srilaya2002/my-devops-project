@@ -2,8 +2,11 @@
 # Full build, in order: install Oracle 19c software -> configure the primary
 # (passwords, ARCHIVELOG, FORCE LOGGING) -> build the standby (listener,
 # directories, password file, RMAN duplicate, redo transport, managed
-# recovery). Each playbook is idempotent on its own and can also be run
-# individually with --limit / -i against just the hosts it needs.
+# recovery) -> configure Data Guard Broker (standby redo logs, broker
+# config, standby registration). Each playbook is idempotent on its own and
+# can also be run individually with --limit / -i against just the hosts it
+# needs.
 - import_playbook: install.yml
 - import_playbook: primary.yml
 - import_playbook: standby.yml
+- import_playbook: broker.yml

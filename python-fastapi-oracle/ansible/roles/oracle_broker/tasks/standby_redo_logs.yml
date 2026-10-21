@@ -1,0 +1,96 @@
+---
+# Standby redo logs are required on BOTH databases for Data Guard Broker --
+# without them broker flags ORA-16789 ("standby redo logs configured
+# incorrectly") and won't run apply cleanly. This was missed entirely
+# during the original manual build (managed recovery ran fine without
+# them) and only surfaced once broker was introduced. One more group than
+# primary's online redo log count, same size, on both sides -- primary
+# needs them too, in case it ever becomes a standby after a switchover.
+#
+# Adding a standby logfile while managed recovery is actively applying can
+# fail with ORA-01156 (hit this live) -- recovery is paused around the add
+# on the standby side and resumed afterward.
+
+- name: Check existing standby redo log group count
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT COUNT(*) FROM v\$standby_log;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ (inventory_hostname == primary_host) | ternary(primary_sid, standby_sid) }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: standby_log_count_check
+  changed_when: false
+
+- name: Pause managed recovery on standby before adding standby logfiles
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER DATABASE RECOVER MANAGED STANDBY DATABASE CANCEL;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  failed_when: false
+  changed_when: false
+  when:
+    - inventory_hostname == standby_host
+    - (standby_log_count_check.stdout | trim | int) < standby_redo_log_count
+
+- name: Add missing standby redo log groups on primary
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER DATABASE ADD STANDBY LOGFILE GROUP {{ item }} ('{{ primary_datafile_dir }}/standby_redo{{ '%02d' % item }}.log') SIZE {{ standby_redo_log_size }};
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  loop: "{{ range(standby_redo_log_start_group, standby_redo_log_start_group + standby_redo_log_count) | list }}"
+  when:
+    - inventory_hostname == primary_host
+    - (standby_log_count_check.stdout | trim | int) < standby_redo_log_count
+
+- name: Add missing standby redo log groups on standby
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER DATABASE ADD STANDBY LOGFILE GROUP {{ item }} ('{{ standby_datafile_dir }}/standby_redo{{ '%02d' % item }}.log') SIZE {{ standby_redo_log_size }};
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  loop: "{{ range(standby_redo_log_start_group, standby_redo_log_start_group + standby_redo_log_count) | list }}"
+  when:
+    - inventory_hostname == standby_host
+    - (standby_log_count_check.stdout | trim | int) < standby_redo_log_count
+
+- name: Resume managed recovery on standby after adding standby logfiles
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER DATABASE RECOVER MANAGED STANDBY DATABASE USING CURRENT LOGFILE DISCONNECT;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when:
+    - inventory_hostname == standby_host
+    - (standby_log_count_check.stdout | trim | int) < standby_redo_log_count
