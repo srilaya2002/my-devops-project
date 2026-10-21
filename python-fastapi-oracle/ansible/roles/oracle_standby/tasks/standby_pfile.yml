@@ -1,9 +1,23 @@
 ---
-# Standby pfile + nomount startup. The standby runs off a plain pfile (not
-# an spfile) for this whole build, which is why redo_transport.yml below
-# uses SCOPE=MEMORY instead of SCOPE=BOTH when setting parameters on it.
+# Standby pfile + nomount startup.
+#
+# The template deploy is gated on the file not already existing -- NOT
+# unconditional. Earlier this overwrote a real, working, hand-tuned
+# init.ora with this role's reconstructed template on every run. It caused
+# no visible harm at the time (the already-running instance just kept
+# using its in-memory config and ignored the file on disk), but it baked a
+# real bug (missing db_recovery_file_dest) back in, invisibly, until a
+# later CREATE SPFILE FROM PFILE read that stale file and failed at
+# STARTUP MOUNT. Never deploy this template over a file that already
+# exists.
 
-- name: Deploy the standby's init.ora
+- name: Check whether a standby init.ora already exists
+  stat:
+    path: "{{ oracle_home }}/dbs/init{{ standby_sid }}.ora"
+  register: standby_initora_stat
+  when: inventory_hostname == standby_host
+
+- name: Deploy the standby's init.ora (first run only -- never overwrites an existing one)
   template:
     src: init_standby.ora.j2
     dest: "{{ oracle_home }}/dbs/init{{ standby_sid }}.ora"
@@ -11,7 +25,9 @@
     group: "{{ oracle_group }}"
     mode: '0640'
   become: true
-  when: inventory_hostname == standby_host
+  when:
+    - inventory_hostname == standby_host
+    - not standby_initora_stat.stat.exists
 
 - name: Check whether the standby instance is already started (nomount or further)
   shell: |

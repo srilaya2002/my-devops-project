@@ -29,3 +29,8 @@ sys_password: "OraclePwd_19c"
 # Local staging dir on the Ansible controller, used only to hop the standby
 # password file from primary to standby. Safe to delete between runs.
 local_pwfile_staging_dir: "{{ playbook_dir }}/../tmp_oracle_standby"
+
+# Fast recovery area size for the standby -- added after a real failure
+# (ORA-19801, DB_RECOVERY_FILE_DEST not set) when converting the standby
+# to an spfile. See init_standby.ora.j2 and spfile_conversion.yml.
+standby_recovery_area_size: 10G

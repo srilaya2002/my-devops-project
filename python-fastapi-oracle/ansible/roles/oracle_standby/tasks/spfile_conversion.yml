@@ -1,0 +1,73 @@
+---
+# Convert the standby from a plain pfile to an spfile. Required for Data
+# Guard Broker (switchover/failover persist real parameter changes across
+# the role flip, which a plain pfile can't do). Encodes the exact sequence
+# proven live: cancel recovery, CREATE SPFILE FROM PFILE, SHUTDOWN ABORT,
+# STARTUP MOUNT. init_standby.ora.j2 already sets db_recovery_file_dest/
+# _size, so this doesn't repeat the ORA-19801 failure that happened before
+# that was added.
+
+- name: Check whether the standby is already running on an spfile
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT value FROM v\$parameter WHERE name = 'spfile';
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: standby_spfile_check
+  changed_when: false
+  when: inventory_hostname == standby_host
+
+# Harmless if recovery isn't running (ORA-16136) -- just clearing the way
+# for a clean shutdown.
+- name: Cancel managed recovery before converting to spfile
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER DATABASE RECOVER MANAGED STANDBY DATABASE CANCEL;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  failed_when: false
+  changed_when: false
+  when:
+    - inventory_hostname == standby_host
+    - standby_spfile_check.stdout | trim == ''
+
+- name: Create spfile from pfile and remount on it
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    CREATE SPFILE FROM PFILE;
+    SHUTDOWN ABORT;
+    STARTUP MOUNT;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: spfile_conversion_result
+  when:
+    - inventory_hostname == standby_host
+    - standby_spfile_check.stdout | trim == ''
+
+- name: Fail clearly if the spfile conversion didn't remount cleanly
+  fail:
+    msg: "Standby did not come back up MOUNTED after the spfile conversion -- check spfile_conversion_result.stdout. Likely an initialization parameter problem (as happened with ORA-19801/DB_RECOVERY_FILE_DEST) -- fix init_standby.ora.j2 and the live init.ora, then retry this step manually before re-running the playbook."
+  when:
+    - inventory_hostname == standby_host
+    - standby_spfile_check.stdout | trim == ''
+    - spfile_conversion_result is defined
+    - "'Database mounted' not in spfile_conversion_result.stdout"

@@ -1,10 +1,11 @@
 ---
 # Redo transport -- LOG_ARCHIVE_CONFIG must be set on BOTH databases or you
-# get ORA-16047 (DGID mismatch). Primary has an spfile (DBCA default) so
-# SCOPE=BOTH persists there; the standby runs off a plain pfile, so the same
-# parameter there needs SCOPE=MEMORY (SCOPE=BOTH fails with ORA-32001 --
-# "write to SPFILE requested but no SPFILE is in use" -- hit this exact
-# error during the manual build).
+# get ORA-16047 (DGID mismatch). Both sides now use SCOPE=BOTH: primary has
+# always had an spfile (DBCA default), and the standby does too since
+# spfile_conversion.yml runs before this. (Earlier, before that conversion
+# existed, the standby ran off a plain pfile and this had to use
+# SCOPE=MEMORY instead -- SCOPE=BOTH failed there with ORA-32001, "write to
+# SPFILE requested but no SPFILE is in use".)
 
 - name: Check current LOG_ARCHIVE_CONFIG on primary
   shell: |
@@ -58,10 +59,10 @@
   changed_when: false
   when: inventory_hostname == standby_host
 
-- name: Set LOG_ARCHIVE_CONFIG on standby (SCOPE=MEMORY -- no spfile in use)
+- name: Set LOG_ARCHIVE_CONFIG on standby
   shell: |
     sqlplus -s / as sysdba <<EOSQL
-    ALTER SYSTEM SET LOG_ARCHIVE_CONFIG='DG_CONFIG=({{ primary_db_unique_name }},{{ standby_db_unique_name }})' SCOPE=MEMORY;
+    ALTER SYSTEM SET LOG_ARCHIVE_CONFIG='DG_CONFIG=({{ primary_db_unique_name }},{{ standby_db_unique_name }})' SCOPE=BOTH;
     exit;
     EOSQL
   become: true

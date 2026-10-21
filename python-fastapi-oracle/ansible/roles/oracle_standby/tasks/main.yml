@@ -18,6 +18,9 @@
 - name: RMAN duplicate
   include_tasks: duplicate.yml
 
+- name: Convert standby to spfile (required for Data Guard Broker later)
+  include_tasks: spfile_conversion.yml
+
 - name: Redo transport configuration
   include_tasks: redo_transport.yml
 
