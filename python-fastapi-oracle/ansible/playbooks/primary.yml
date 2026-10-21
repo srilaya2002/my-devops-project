@@ -1,0 +1,7 @@
+---
+- name: Configure the primary database (passwords, ARCHIVELOG, FORCE LOGGING)
+  hosts: primary
+  become: true
+  gather_facts: true
+  roles:
+    - role: oracle_primary

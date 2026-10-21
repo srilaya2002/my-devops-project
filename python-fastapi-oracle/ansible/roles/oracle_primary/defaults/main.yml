@@ -1,0 +1,11 @@
+---
+oracle_base: /opt/oracle
+oracle_home: /opt/oracle/product/19c/dbhome_1
+oracle_sid: ORCLCDB
+oracle_user: oracle
+oracle_group: oinstall
+
+# Home-lab defaults -- override with --extra-vars (or an ansible-vault file) for
+# anything that isn't a throwaway lab environment.
+sys_password: "OraclePwd_19c"
+system_password: "OraclePwd_19c"

@@ -1,0 +1,103 @@
+---
+# Primary database configuration -- password change, ARCHIVELOG mode, and
+# FORCE LOGGING. All three were done by hand during the manual build; this
+# role encodes that exact sequence and makes each step idempotent so re-runs
+# are safe.
+
+- name: Check whether the SYS/SYSTEM passwords have already been set by Ansible
+  stat:
+    path: "{{ oracle_base }}/.ansible_passwords_set"
+  register: passwords_marker
+
+- name: Change SYS and SYSTEM passwords
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER USER sys IDENTIFIED BY "{{ sys_password }}";
+    ALTER USER system IDENTIFIED BY "{{ system_password }}";
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ oracle_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: not passwords_marker.stat.exists
+  no_log: true
+
+- name: Drop a marker so the password change doesn't repeat on every run
+  file:
+    path: "{{ oracle_base }}/.ansible_passwords_set"
+    state: touch
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0600'
+  when: not passwords_marker.stat.exists
+
+- name: Check current log mode
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT log_mode FROM v\$database;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ oracle_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: log_mode_check
+  changed_when: false
+
+# ARCHIVELOG can only be enabled with the database in MOUNT (not OPEN), so
+# this is a real shutdown/startup -- same sequence as the manual build.
+- name: Enable ARCHIVELOG mode
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    SHUTDOWN IMMEDIATE;
+    STARTUP MOUNT;
+    ALTER DATABASE ARCHIVELOG;
+    ALTER DATABASE OPEN;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ oracle_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: "'ARCHIVELOG' not in log_mode_check.stdout"
+  register: archivelog_change
+
+- name: Check current FORCE LOGGING status
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT force_logging FROM v\$database;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ oracle_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: force_logging_check
+  changed_when: false
+
+# Required for Data Guard: without it, NOLOGGING operations on primary would
+# never reach the standby via redo and would silently desync the databases.
+- name: Enable FORCE LOGGING
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER DATABASE FORCE LOGGING;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ oracle_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: "'YES' not in force_logging_check.stdout"
