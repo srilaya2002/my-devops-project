@@ -1,0 +1,8 @@
+---
+oracle_base: /opt/oracle
+oracle_home: /opt/oracle/product/19c/dbhome_1
+oracle_sid: ORCLCDB
+# Local path on the Ansible controller (this Mac) to the Oracle 19c EE installer RPM.
+# Only read when Oracle isn't already installed on the target -- re-download it to
+# this path if you're ever rebuilding a VM from scratch; it isn't kept in the repo.
+rpm_local_path: "/Users/srilaya/Downloads/oracle-database-ee-19c-1.0-1.x86_64.rpm"

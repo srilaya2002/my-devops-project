@@ -1,0 +1,7 @@
+---
+- name: Install Oracle 19c software on all lab hosts
+  hosts: oracle_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: oracle_build

@@ -1,0 +1,61 @@
+---
+# Oracle 19c software install -- idempotent, safe to run against a host that
+# already has it installed (as both lab VMs currently do).
+
+- name: Check if Oracle 19c is already installed
+  stat:
+    path: "{{ oracle_home }}/bin/sqlplus"
+  register: oracle_installed
+
+- name: Copy Oracle 19c installer RPM to host
+  copy:
+    src: "{{ rpm_local_path }}"
+    dest: "/root/{{ rpm_local_path | basename }}"
+  when: not oracle_installed.stat.exists
+
+- name: Install Oracle 19c via dnf localinstall
+  dnf:
+    name: "/root/{{ rpm_local_path | basename }}"
+    state: present
+    disable_gpg_check: true
+  when: not oracle_installed.stat.exists
+
+# The preinstall RPM is supposed to create this, but on this lab build it
+# didn't -- su/login as oracle silently failed without it. Always ensured,
+# not conditional, since it's harmless if it already exists.
+- name: Ensure the oracle user's home directory exists
+  file:
+    path: /home/oracle
+    state: directory
+    owner: oracle
+    group: oinstall
+    mode: '0755'
+
+- name: Set Oracle environment variables in the oracle user's bash_profile
+  blockinfile:
+    path: /home/oracle/.bash_profile
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - oracle env"
+    create: true
+    owner: oracle
+    group: oinstall
+    block: |
+      export ORACLE_HOME={{ oracle_home }}
+      export ORACLE_SID={{ oracle_sid }}
+      export PATH=$ORACLE_HOME/bin:$PATH
+
+- name: Check firewalld status
+  command: systemctl is-active firewalld
+  register: firewalld_status
+  changed_when: false
+  failed_when: false
+
+# Oracle Linux 8 Minimal install only opens SSH by default -- the listener
+# port silently failing with TNS-12543 (destination host unreachable) is
+# what exposed this on the lab build.
+- name: Open the Oracle listener port (1521/tcp) in firewalld
+  ansible.posix.firewalld:
+    port: 1521/tcp
+    permanent: true
+    state: enabled
+    immediate: true
+  when: firewalld_status.stdout == "active"
