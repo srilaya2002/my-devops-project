@@ -1,0 +1,16 @@
+---
+# Standalone -- not part of site.yml. Run with --limit against the single
+# crashed host being rebuilt, same convention as the SQL Server project's
+# sync_rebuild.yml:
+#   ansible-playbook -i ansible/inventory/hosts.ini ansible/playbooks/rebuild.yml --limit oracle_primary
+- name: Rebuild a crashed primary as a fresh standby after a real Data Guard failover
+  hosts: oracle_servers
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Run rebuild tasks
+      include_role:
+        name: oracle_standby
+        tasks_from: rebuild.yml
+      tags:
+        - rebuild

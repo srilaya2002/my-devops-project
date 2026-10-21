@@ -1,0 +1,183 @@
+---
+# Rebuilds a crashed primary as a fresh physical standby of the surviving
+# database, after a real Data Guard Broker FAILOVER has already promoted
+# the standby to primary. Mirrors python-fastapi-mssql's sync_rebuild.yml
+# in purpose and invocation: run explicitly via
+# ansible/playbooks/rebuild.yml with --limit against the single host being
+# rebuilt, never as part of the normal site.yml chain.
+#
+# Encodes the exact manual recovery proven live after testing a real
+# failover: FAILOVER TO '{{ standby_db_unique_name }}' promoted the
+# standby, and REINSTATE DATABASE failed with ORA-16653 because Flashback
+# Database was never enabled in this build -- so recovery means a full
+# rebuild via RMAN duplicate, the same technique as the original standby
+# build, with db_file_name_convert/fal_server/fal_client reversed.
+#
+# Direction is fixed, not generic: this always rebuilds primary_host as a
+# standby of standby_host/standby_db_unique_name. That's the only
+# direction actually tested -- a standby-side failure doesn't need this at
+# all, since the still-healthy primary just keeps running.
+#
+# Safety: if this host is already a healthy physical standby, every
+# destructive step below is skipped. This does not blindly wipe datafiles
+# on every run, only when the target genuinely isn't already a working
+# standby.
+
+- name: Check this host's current database role (may fail entirely if the instance is down)
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT database_role FROM v\$database;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: rebuild_role_check
+  changed_when: false
+  failed_when: false
+
+- name: Stop the crashed/stale instance if it's still up in some form
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    SHUTDOWN ABORT;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  failed_when: false
+  changed_when: false
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+
+- name: Ensure the rebuild target's directory tree exists
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0750'
+  become: true
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+  loop:
+    - "{{ primary_datafile_dir }}"
+    - "{{ primary_datafile_dir }}/pdbseed"
+    - "{{ primary_datafile_dir }}/{{ pdb_name }}"
+    - "{{ primary_datafile_dir }}/fast_recovery_area"
+
+- name: Clear the old (crashed) datafiles -- keeps the directories themselves
+  shell: |
+    rm -f {{ primary_datafile_dir }}/*.ctl {{ primary_datafile_dir }}/*.log {{ primary_datafile_dir }}/*.dbf
+    rm -f {{ primary_datafile_dir }}/pdbseed/* {{ primary_datafile_dir }}/{{ pdb_name }}/*
+  become: true
+  become_user: "{{ oracle_user }}"
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+
+- name: Deploy the rebuild target's init file (reversed direction from the original standby's)
+  template:
+    src: init_rebuild_primary.ora.j2
+    dest: "{{ oracle_home }}/dbs/init{{ primary_sid }}.ora"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0640'
+  become: true
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+
+- name: Start the rebuild target in NOMOUNT off its new pfile
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    STARTUP NOMOUNT PFILE='{{ oracle_home }}/dbs/init{{ primary_sid }}.ora';
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+
+- name: RMAN duplicate from the surviving database (reversed source/target from the original build)
+  shell: |
+    rman target sys/"{{ sys_password }}"@{{ standby_db_unique_name }} auxiliary sys/"{{ sys_password }}"@{{ primary_db_unique_name }} <<EORMAN
+    DUPLICATE TARGET DATABASE FOR STANDBY FROM ACTIVE DATABASE
+      NOFILENAMECHECK;
+    EORMAN
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: rebuild_duplicate_result
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+
+- name: Fail clearly if the rebuild duplicate did not report success
+  fail:
+    msg: "RMAN duplicate did not finish cleanly during rebuild -- check rebuild_duplicate_result.stdout before retrying."
+  when:
+    - "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+    - rebuild_duplicate_result is defined
+    - "'Finished Duplicate Db' not in rebuild_duplicate_result.stdout"
+
+- name: Convert the rebuilt standby to an spfile
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    CREATE SPFILE FROM PFILE;
+    SHUTDOWN ABORT;
+    STARTUP MOUNT;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: rebuild_spfile_result
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+
+- name: Fail clearly if the rebuild target didn't remount cleanly on its new spfile
+  fail:
+    msg: "Rebuilt standby did not come back up MOUNTED after the spfile conversion -- check rebuild_spfile_result.stdout."
+  when:
+    - "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+    - rebuild_spfile_result is defined
+    - "'Database mounted' not in rebuild_spfile_result.stdout"
+
+- name: Enable Data Guard Broker on the rebuilt standby
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER SYSTEM SET DG_BROKER_START=TRUE SCOPE=BOTH;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ primary_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"
+
+# Runs from the surviving primary, not the rebuild target -- dgmgrl needs
+# to reach a database that's actually open, and delegate_to lets this one
+# task reach standby_host regardless of what --limit scoped this play to.
+- name: Re-register the rebuilt standby with Data Guard Broker
+  shell: |
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ standby_db_unique_name }} "add database '{{ primary_db_unique_name }}' as connect identifier is {{ primary_db_unique_name }}"
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ standby_db_unique_name }} "enable configuration"
+    dgmgrl -silent sys/"{{ sys_password }}"@{{ standby_db_unique_name }} "enable database '{{ primary_db_unique_name }}'"
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  delegate_to: "{{ standby_host }}"
+  when: "'PHYSICAL STANDBY' not in rebuild_role_check.stdout"

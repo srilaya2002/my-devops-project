@@ -34,3 +34,7 @@ local_pwfile_staging_dir: "{{ playbook_dir }}/../tmp_oracle_standby"
 # (ORA-19801, DB_RECOVERY_FILE_DEST not set) when converting the standby
 # to an spfile. See init_standby.ora.j2 and spfile_conversion.yml.
 standby_recovery_area_size: 10G
+
+# Used only by rebuild.yml, when rebuilding a crashed primary as a fresh
+# standby after a real Data Guard failover.
+primary_recovery_area_size: 10G
