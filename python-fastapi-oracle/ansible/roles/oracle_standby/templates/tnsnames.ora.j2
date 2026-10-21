@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+{{ primary_db_unique_name }} =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = {{ primary_ip }})(PORT = 1521))
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SID = {{ primary_sid }})
+    )
+  )
+
+{{ standby_db_unique_name }} =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_ip }})(PORT = 1521))
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SID = {{ standby_sid }})
+    )
+  )

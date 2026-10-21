@@ -1,0 +1,64 @@
+---
+# Static listener registration + tnsnames entries for both databases, on
+# both hosts. Static registration matters here because during RMAN duplicate
+# and startup nomount the instance hasn't dynamically registered with the
+# listener yet (no PMON registration), so a dynamic-only listener.ora means
+# "ORA-12514: TNS:listener does not currently know of service" at exactly
+# the point you need the standby connection to work.
+
+- name: Deploy listener.ora
+  template:
+    src: listener.ora.j2
+    dest: "{{ oracle_home }}/network/admin/listener.ora"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0644'
+  become: true
+  register: listener_ora_deployed
+
+- name: Deploy tnsnames.ora (entries for both primary and standby)
+  template:
+    src: tnsnames.ora.j2
+    dest: "{{ oracle_home }}/network/admin/tnsnames.ora"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0644'
+  become: true
+
+- name: Restart the listener to pick up listener.ora changes
+  shell: |
+    lsnrctl stop
+    lsnrctl start
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when: listener_ora_deployed.changed
+
+- name: Make sure the listener is running (first-run case, no prior listener.ora change to trigger on)
+  shell: |
+    lsnrctl status || lsnrctl start
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: listener_status
+  changed_when: "'TNS-' in listener_status.stdout"
+  failed_when: false
+
+- name: Check firewalld status
+  command: systemctl is-active firewalld
+  register: firewalld_status_standby_role
+  changed_when: false
+  failed_when: false
+
+- name: Ensure the Oracle listener port (1521/tcp) stays open
+  ansible.posix.firewalld:
+    port: 1521/tcp
+    permanent: true
+    state: enabled
+    immediate: true
+  become: true
+  when: firewalld_status_standby_role.stdout == "active"

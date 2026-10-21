@@ -1,0 +1,7 @@
+---
+- name: Build the Data Guard standby (listener, directories, password file, duplicate, redo transport, managed recovery)
+  hosts: oracle_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: oracle_standby

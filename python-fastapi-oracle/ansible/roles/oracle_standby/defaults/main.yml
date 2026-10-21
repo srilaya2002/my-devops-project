@@ -1,0 +1,31 @@
+---
+oracle_base: /opt/oracle
+oracle_home: /opt/oracle/product/19c/dbhome_1
+oracle_user: oracle
+oracle_group: oinstall
+
+primary_sid: ORCLCDB
+primary_db_unique_name: ORCLCDB
+standby_sid: ORCLCDB
+standby_db_unique_name: ORCLCDB_STBY
+
+# Group/host names as they appear in inventory/hosts.ini
+primary_host: oracle_primary
+standby_host: oracle_standby
+
+primary_ip: "{{ hostvars[primary_host].ansible_host }}"
+standby_ip: "{{ hostvars[standby_host].ansible_host }}"
+
+primary_datafile_dir: /opt/oracle/oradata/ORCLCDB
+# Deliberately a different path from the primary's -- an identical path here
+# is what caused RMAN-05001 (auxiliary file name conflicts with target
+# database) during the manual build. Keep this distinct.
+standby_datafile_dir: /opt/oracle/oradata/ORCLCDB_STBY
+pdb_name: ORCLPDB1
+
+# Must match oracle_primary role's sys_password -- same database, same user.
+sys_password: "OraclePwd_19c"
+
+# Local staging dir on the Ansible controller, used only to hop the standby
+# password file from primary to standby. Safe to delete between runs.
+local_pwfile_staging_dir: "{{ playbook_dir }}/../tmp_oracle_standby"

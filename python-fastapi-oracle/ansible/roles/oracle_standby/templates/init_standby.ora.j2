@@ -1,0 +1,37 @@
+# {{ ansible_managed }}
+# Standby init parameters -- reconstructed from the manual build. Review
+# against the working pfile on oracle_standby (/opt/oracle/product/19c/dbhome_1/dbs/init{{ standby_sid }}.ora)
+# before trusting this on a rebuild; db_name/compatible/memory settings in
+# particular should match whatever the real primary database is using.
+db_name={{ primary_sid }}
+db_unique_name={{ standby_db_unique_name }}
+instance_name={{ standby_sid }}
+compatible=19.0.0
+enable_pluggable_database=true
+
+control_files='{{ standby_datafile_dir }}/control01.ctl'
+db_create_file_dest='{{ standby_datafile_dir }}'
+
+# Must map to a genuinely different path than the primary's -- an identity
+# mapping (same path on both sides) still trips RMAN-05001 during duplicate.
+db_file_name_convert='{{ primary_datafile_dir }}','{{ standby_datafile_dir }}'
+log_file_name_convert='{{ primary_datafile_dir }}','{{ standby_datafile_dir }}'
+
+log_archive_config='dg_config=({{ primary_db_unique_name }},{{ standby_db_unique_name }})'
+log_archive_dest_1='location=USE_DB_RECOVERY_FILE_DEST valid_for=(ALL_LOGFILES,ALL_ROLES) db_unique_name={{ standby_db_unique_name }}'
+log_archive_dest_2='service={{ primary_db_unique_name }} valid_for=(ONLINE_LOGFILES,PRIMARY_ROLE) db_unique_name={{ primary_db_unique_name }}'
+log_archive_dest_state_1=enable
+log_archive_dest_state_2=enable
+
+fal_server={{ primary_db_unique_name }}
+fal_client={{ standby_db_unique_name }}
+standby_file_management=AUTO
+remote_login_passwordfile=EXCLUSIVE
+
+audit_file_dest='{{ oracle_base }}/admin/{{ standby_sid }}/adump'
+diagnostic_dest='{{ oracle_base }}'
+undo_tablespace=UNDOTBS1
+sga_target=1600M
+pga_aggregate_target=512M
+processes=300
+open_cursors=300

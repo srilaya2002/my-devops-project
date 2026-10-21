@@ -1,0 +1,19 @@
+---
+# Standby datafile directory structure. Needs the CDB root dir plus pdbseed
+# and the named PDB subdirs -- the manual build hit ORA-19505 ("failed to
+# identify file") because only the CDB-root dir existed and the PDB-level
+# datafiles (pdbseed, ORCLPDB1) had nowhere to land.
+
+- name: Create standby datafile directory tree
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0750'
+  become: true
+  when: inventory_hostname == standby_host
+  loop:
+    - "{{ standby_datafile_dir }}"
+    - "{{ standby_datafile_dir }}/pdbseed"
+    - "{{ standby_datafile_dir }}/{{ pdb_name }}"

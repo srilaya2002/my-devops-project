@@ -1,0 +1,89 @@
+---
+# RMAN duplicate -- the actual standby build. This step alone cost three
+# real failures during the manual build (RMAN-05001 twice, ORA-19505 once).
+# Both are designed around already, before this task runs: standby_pfile.yml
+# deploys a pfile whose db_file_name_convert/log_file_name_convert/
+# control_files already point at standby_datafile_dir -- a genuinely
+# different path from the primary's (an identity conversion to the *same*
+# path still trips RMAN-05001) -- and directories.yml pre-creates the
+# pdbseed/{{ pdb_name }} subdirectories that ORA-19505 was missing.
+#
+# Deliberately NOT using RMAN's "SPFILE ... SET ..." duplicate clause: the
+# standby runs off a plain pfile for this whole build (confirmed by
+# ORA-32001 when redo_transport.yml tried SCOPE=BOTH against it), so the
+# conversions are left to the pfile already in place rather than asked of
+# RMAN a second way.
+#
+# Idempotency checks the LIVE database role, not just a marker file -- a
+# standby that already exists (built manually, or by an earlier run of this
+# playbook) has no reason to carry the marker, and re-running DUPLICATE
+# against an already-built, already-replicating standby is not something to
+# risk. The marker is only a fast-path for later runs once the role check
+# below has already confirmed PHYSICAL STANDBY once.
+
+- name: Check whether the standby has already been marked duplicated
+  stat:
+    path: "{{ oracle_base }}/.standby_duplicated"
+  register: standby_duplicated_marker
+  when: inventory_hostname == standby_host
+
+- name: Check the standby's live database role (works once MOUNTED or further)
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT database_role FROM v\$database;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: standby_role_check
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname == standby_host
+    - not standby_duplicated_marker.stat.exists
+
+- name: Run RMAN duplicate for standby from active database
+  shell: |
+    rman target sys/"{{ sys_password }}"@{{ primary_db_unique_name }} auxiliary sys/"{{ sys_password }}"@{{ standby_db_unique_name }} <<EORMAN
+    DUPLICATE TARGET DATABASE FOR STANDBY FROM ACTIVE DATABASE
+      NOFILENAMECHECK;
+    EORMAN
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: rman_duplicate_result
+  when:
+    - inventory_hostname == standby_host
+    - not standby_duplicated_marker.stat.exists
+    - "'PHYSICAL STANDBY' not in standby_role_check.stdout"
+
+- name: Fail clearly if RMAN duplicate did not report success
+  fail:
+    msg: "RMAN duplicate did not finish cleanly -- check rman_duplicate_result.stdout before retrying. This step is NOT safely re-runnable without manual cleanup (partially-duplicated datafiles, stale standby controlfile) -- clear {{ standby_datafile_dir }} and restart from standby_pfile.yml's NOMOUNT step if it needs a retry."
+  when:
+    - inventory_hostname == standby_host
+    - not standby_duplicated_marker.stat.exists
+    - "'PHYSICAL STANDBY' not in standby_role_check.stdout"
+    - rman_duplicate_result is defined
+    - "'Finished Duplicate Db' not in rman_duplicate_result.stdout"
+
+- name: Mark the standby as duplicated (fresh RMAN success, or already found to be a physical standby)
+  file:
+    path: "{{ oracle_base }}/.standby_duplicated"
+    state: touch
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0644'
+  become: true
+  when:
+    - inventory_hostname == standby_host
+    - not standby_duplicated_marker.stat.exists
+    - "'PHYSICAL STANDBY' in standby_role_check.stdout or (rman_duplicate_result is defined and 'Finished Duplicate Db' in rman_duplicate_result.stdout)"

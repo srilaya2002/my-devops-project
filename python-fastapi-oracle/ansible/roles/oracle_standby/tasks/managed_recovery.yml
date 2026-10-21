@@ -1,0 +1,39 @@
+---
+# Start managed recovery on the standby. This is the step that actually
+# makes it apply shipped redo -- without it the standby just sits MOUNTED,
+# receiving archived logs via RFS but never applying them (confirmed
+# working in the manual build: v$archived_log showed APPLIED=YES for the
+# test log switch only once this was running).
+
+- name: Check whether managed recovery (MRP0) is already running
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off feedback off pagesize 0 verify off
+    SELECT COUNT(*) FROM v\$managed_standby WHERE process LIKE 'MRP%';
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: mrp_check
+  changed_when: false
+  when: inventory_hostname == standby_host
+
+- name: Start managed recovery (real-time apply, disconnected from the session)
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    ALTER DATABASE RECOVER MANAGED STANDBY DATABASE USING CURRENT LOGFILE DISCONNECT;
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when:
+    - inventory_hostname == standby_host
+    - mrp_check.stdout | trim | int == 0

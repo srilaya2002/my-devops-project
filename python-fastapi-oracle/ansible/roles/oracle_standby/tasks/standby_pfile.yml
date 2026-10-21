@@ -1,0 +1,44 @@
+---
+# Standby pfile + nomount startup. The standby runs off a plain pfile (not
+# an spfile) for this whole build, which is why redo_transport.yml below
+# uses SCOPE=MEMORY instead of SCOPE=BOTH when setting parameters on it.
+
+- name: Deploy the standby's init.ora
+  template:
+    src: init_standby.ora.j2
+    dest: "{{ oracle_home }}/dbs/init{{ standby_sid }}.ora"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0640'
+  become: true
+  when: inventory_hostname == standby_host
+
+- name: Check whether the standby instance is already started (nomount or further)
+  shell: |
+    echo "exit;" | sqlplus -s / as sysdba
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  register: standby_instance_check
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname == standby_host
+
+- name: Start the standby instance in NOMOUNT (first run only)
+  shell: |
+    sqlplus -s / as sysdba <<EOSQL
+    STARTUP NOMOUNT PFILE='{{ oracle_home }}/dbs/init{{ standby_sid }}.ora';
+    exit;
+    EOSQL
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_SID: "{{ standby_sid }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
+  when:
+    - inventory_hostname == standby_host
+    - standby_instance_check.rc != 0

@@ -1,0 +1,30 @@
+---
+# Hop the primary's password file to the standby. Data Guard's redo
+# transport (and RMAN's auxiliary connection during duplicate) authenticate
+# host-to-host using this file, not a TNS login -- so it has to be kept in
+# sync whenever the primary's SYS password changes, not just copied once.
+#
+# Deliberately unconditional (no "skip if it already exists" check): a SYS
+# password change on primary silently re-signs its password file, and an
+# existence check alone can't tell a current copy from a stale one. `copy`
+# below is still idempotent on its own -- it only reports changed when the
+# content actually differs -- so this costs nothing extra on a re-run where
+# nothing changed.
+
+- name: Fetch the primary's password file to the controller
+  fetch:
+    src: "{{ oracle_home }}/dbs/orapw{{ primary_sid }}"
+    dest: "{{ local_pwfile_staging_dir }}/orapw{{ primary_sid }}"
+    flat: true
+  become: true
+  when: inventory_hostname == primary_host
+
+- name: Copy the password file onto the standby
+  copy:
+    src: "{{ local_pwfile_staging_dir }}/orapw{{ primary_sid }}"
+    dest: "{{ oracle_home }}/dbs/orapw{{ standby_sid }}"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_group }}"
+    mode: '0640'
+  become: true
+  when: inventory_hostname == standby_host

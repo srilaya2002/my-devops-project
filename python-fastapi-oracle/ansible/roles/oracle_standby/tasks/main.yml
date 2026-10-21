@@ -1,0 +1,25 @@
+---
+# Runs against the combined oracle_servers group (both primary and standby).
+# Each included file gates its own tasks by inventory_hostname where a step
+# only belongs on one side -- see each file's own tasks for specifics.
+
+- name: Listener + tnsnames (both hosts)
+  include_tasks: listener_tnsnames.yml
+
+- name: Standby directory structure
+  include_tasks: directories.yml
+
+- name: Password file hop (primary -> standby)
+  include_tasks: pwfile.yml
+
+- name: Standby pfile + nomount startup
+  include_tasks: standby_pfile.yml
+
+- name: RMAN duplicate
+  include_tasks: duplicate.yml
+
+- name: Redo transport configuration
+  include_tasks: redo_transport.yml
+
+- name: Start managed recovery
+  include_tasks: managed_recovery.yml
